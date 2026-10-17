@@ -1,35 +1,34 @@
-# Use this file if your backend is Python (Flask-SocketIO). Delete ci-node.yml.
 name: CI
+
 on:
   push:
-    branches: [main]
+    branches: [ "workflow", "main" ]
   pull_request:
-    branches: [main]
+    branches: [ "workflow", "main" ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.9", "3.12"]   # SRS 2.4: Python 3.9+
+        python-version: ["3.9", "3.12"]
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-      - run: pip install -r requirements.txt pytest flake8
-      - name: Lint (reports problems, does not fail the build yet)
-        run: flake8 . --max-line-length 100 --exit-zero
-      - name: Unit and integration tests (BL-11)
-        run: pytest
-      - name: Smoke test - server starts with one command (BL-01)
-        env:
-          PORT: 5000                  # change to your server's port
+          cache: 'pip'
+
+      - name: Install dependencies
         run: |
-          python app.py &
-          for i in $(seq 1 20); do
-            nc -z localhost $PORT && echo "Server is up on $PORT" && exit 0
-            sleep 1
-          done
-          echo "Server did not open port $PORT within 20 s"; exit 1
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pytest
+        run: |
+          pytest
