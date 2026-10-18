@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Application (Socket Programming)</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <!-- Pinned official Socket.IO client v4.7.5 -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Chat Application</h1>
+      <div class="status-container">
+        Connection Status: <span id="status">Disconnected</span>
+      </div>
+    </header>
+
+    <div id="error-banner" class="error-banner" hidden></div>
+
+    <section class="controls">
+      <label for="username">Username:</label>
+      <input type="text" id="username" autocomplete="off" maxlength="100">
+      <button id="connect-btn" type="button">Connect</button>
+    </section>
+
+    <main id="chat-area" class="chat-placeholder">
+      chat UI is built in BL-04
+    </main>
+  </div>
+
+  <script src="/static/client.js"></script>
+</body>
+</html>
