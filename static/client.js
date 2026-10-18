@@ -126,5 +126,11 @@ if (connectBtn) {
 // Pre-fill username and initiate connection on initial page load
 if (usernameInput) {
   usernameInput.value = generateGuestUsername();
+  usernameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (!socket || !socket.connected)) {
+      showError("");
+      connectToServer(usernameInput.value);
+    }
+  });
   connectToServer(usernameInput.value);
 }
