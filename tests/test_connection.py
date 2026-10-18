@@ -44,8 +44,40 @@ def test_valid_connection_receives_ack(app):
     client.disconnect()
 
 
-def test_multiple_clients_connected(app):
-    """UT-02A: Two connected clients result in two distinct entries in user dict."""
+def test_blank_and_whitespace_username_refused(app):
+    """UT-01A: Blank or whitespace-only username is rejected during handshake."""
+    # Blank username
+    client_empty = socketio.test_client(app, auth={"username": ""})
+    assert not client_empty.is_connected()
+    assert len(get_connected_users()) == 0
+
+    # Whitespace-only username
+    client_whitespace = socketio.test_client(app, auth={"username": "   \t  "})
+    assert not client_whitespace.is_connected()
+    assert len(get_connected_users()) == 0
+
+    # Missing auth payload
+    client_no_auth = socketio.test_client(app, auth={})
+    assert not client_no_auth.is_connected()
+    assert len(get_connected_users()) == 0
+
+
+def test_51_character_username_refused(app):
+    """UT-01C: Username exceeding 50 characters is rejected during handshake."""
+    long_username = "a" * 51
+    client_long = socketio.test_client(app, auth={"username": long_username})
+    assert not client_long.is_connected()
+    assert len(get_connected_users()) == 0
+
+    # Boundary test: exactly 50 characters should succeed
+    valid_boundary_username = "b" * 50
+    client_50 = socketio.test_client(app, auth={"username": valid_boundary_username})
+    assert client_50.is_connected()
+    client_50.disconnect()
+
+
+def test_two_clients_two_entries_in_connected_users(app):
+    """UT-02A: Two concurrent clients result in two distinct entries in user dict."""
     client1 = socketio.test_client(app, auth={"username": "alice"})
     client2 = socketio.test_client(app, auth={"username": "bob"})
 
@@ -63,7 +95,7 @@ def test_multiple_clients_connected(app):
 
 
 def test_disconnect_removes_user(app):
-    """UT-02B: Disconnecting a client cleans up its entry from connected users."""
+    """UT-02B: Disconnecting a client removes its entry from connected users."""
     client = socketio.test_client(app, auth={"username": "charlie"})
     assert client.is_connected()
 
