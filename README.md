@@ -27,11 +27,12 @@ over dedicated WebSocket connections without long-polling fallbacks.
 | `chat/connection.py` | Connection lifecycle management, handshake auth validation, and connected user registry | REQ-1, REQ-2, BL-02, BL-03 |
 | `chat/rooms.py` | Room management module stub (default global room, join/leave handlers) | BL-14 (Sprint 2) |
 | `chat/broadcast.py` | Message broadcasting module stub (delivering messages to rooms) | BL-05 |
-| `templates/index.html` | Chat UI template with status badge, controls, and error banner | REQ-1, REQ-2, BL-01, BL-02 |
-| `static/client.js` | Client-side Socket.IO client logic (WebSocket-only transport, XSS-safe rendering) | REQ-1, REQ-2, NFR-SEC-2, BL-02, BL-03 |
-| `static/style.css` | UI styling for chat container, status indicators, and error banners | BL-01, BL-02 |
+| `templates/index.html` | Chat UI template with status badge, controls, error banner, message list and message input with Send button | REQ-1, REQ-2, BL-01, BL-02, BL-04 |
+| `static/client.js` | Client-side Socket.IO client logic (WebSocket-only transport, XSS-safe rendering, Send button / Enter key, message rendering) | REQ-1, REQ-2, NFR-SEC-2, BL-02, BL-03, BL-04 |
+| `static/style.css` | UI styling for chat container, status indicators, error banners, message list and responsive (phone width) layout | BL-01, BL-02, BL-04 |
 | `tests/test_smoke.py` | Basic smoke test verifying application factory creation | BL-01 |
 | `tests/test_connection.py` | Pytest test suite testing connection handshakes, refusals, and disconnections | REQ-1, REQ-2, BL-02, BL-03 |
+| `tests/test_chat_ui.py` | Checks the chat page contains the message list, input, Send button, error banner and mobile viewport | BL-04 |
 
 ## Setup Steps
 
@@ -66,6 +67,12 @@ python app.py
 ```
 Then open your web browser at:
 [http://localhost:5000](http://localhost:5000)
+
+### Using the chat page
+- The page connects automatically with a `guest-XXXX` username (change it and click **Connect** to use another name).
+- Type in the message box at the bottom and press **Enter** or click **Send**. Use **Shift+Enter** for a new line.
+- Messages appear in the message area with the sender, the text and the time. The message box and Send button are disabled while disconnected.
+- Problems (server unreachable, rejected username, rejected message) are shown in the red banner at the top.
 
 To override the default port, set the `PORT` environment variable:
 ```bash

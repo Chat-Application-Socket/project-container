@@ -23,6 +23,21 @@ const usernameInput = document.getElementById("username");
 const connectBtn = document.getElementById("connect-btn");
 const errorBanner = document.getElementById("error-banner");
 
+// BL-04: Chat area elements
+const messageList = document.getElementById("message-list");
+const emptyState = document.getElementById("empty-state");
+const messageForm = document.getElementById("message-form");
+const messageInput = document.getElementById("message-input");
+const sendBtn = document.getElementById("send-btn");
+const charCounter = document.getElementById("char-counter");
+
+// Limits and client-local messages (SAD 4.4.2, Table 15)
+const MAX_MESSAGE_LENGTH = 500;
+const MSG_NOT_CONNECTED = "You are not connected."; // C05
+
+// Username confirmed by the server in the "ack" event (used to highlight own messages)
+let currentUsername = null;
+
 // Generate initial guest username: "guest-" + 4 random digits
 function generateGuestUsername() {
   const randomDigits = Math.floor(1000 + Math.random() * 9000);
@@ -43,6 +58,7 @@ function showError(message) {
 
 // Update connection status label and toggle button label
 function updateStatus(statusText, isConnected) {
+  setComposerEnabled(isConnected);
   if (!statusEl) return;
   statusEl.textContent = statusText;
   if (isConnected) {
@@ -52,6 +68,116 @@ function updateStatus(statusText, isConnected) {
     statusEl.classList.remove("connected");
     if (connectBtn) connectBtn.textContent = "Connect";
   }
+}
+
+/* ===========================================================================
+ * BL-04: Chat page UI helpers
+ * ======================================================================== */
+
+// Enable the message box and Send button only while connected (BR-1)
+function setComposerEnabled(enabled) {
+  if (messageInput) messageInput.disabled = !enabled;
+  if (sendBtn) sendBtn.disabled = !enabled;
+}
+
+// Format a server timestamp (RFC 3339 UTC string) as local HH:MM:SS.
+// Falls back to the raw value, or an empty string, if it cannot be parsed.
+function formatTimestamp(timestamp) {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return String(timestamp);
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+// Build one message row: sender + timestamp on top, message text below.
+// Every value is written with textContent so HTML in a message is shown as text (NFR-SEC-2).
+function createMessageElement(msg) {
+  const item = document.createElement("li");
+  item.className = "message";
+  if (currentUsername && msg.sender === currentUsername) {
+    item.classList.add("own");
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "message-meta";
+
+  const sender = document.createElement("span");
+  sender.className = "message-sender";
+  sender.textContent = msg.sender ? String(msg.sender) : "unknown";
+
+  const time = document.createElement("time");
+  time.className = "message-time";
+  if (msg.timestamp) {
+    time.setAttribute("datetime", String(msg.timestamp));
+    time.title = String(msg.timestamp);
+  }
+  time.textContent = formatTimestamp(msg.timestamp);
+
+  const content = document.createElement("p");
+  content.className = "message-content";
+  content.textContent = msg.content == null ? "" : String(msg.content);
+
+  meta.appendChild(sender);
+  meta.appendChild(time);
+  item.appendChild(meta);
+  item.appendChild(content);
+  return item;
+}
+
+// Append a message to the end of the message list
+function renderMessage(msg) {
+  if (!messageList || !msg || typeof msg !== "object") return null;
+  if (emptyState && emptyState.parentNode) {
+    emptyState.parentNode.removeChild(emptyState);
+  }
+  const item = createMessageElement(msg);
+  messageList.appendChild(item);
+  return item;
+}
+
+// Keep the "n / 500" counter in sync with the input box
+function updateCharCounter() {
+  if (!charCounter || !messageInput) return;
+  const length = messageInput.value.length;
+  charCounter.textContent = `${length} / ${MAX_MESSAGE_LENGTH}`;
+  charCounter.classList.toggle("near-limit", length >= MAX_MESSAGE_LENGTH - 50);
+}
+
+// Send the text in the input box to the server.
+// The server derives sender, room and timestamp; the client sends only content (SAD ADR-2).
+function sendMessage() {
+  if (!messageInput) return;
+
+  if (!socket || !socket.connected) {
+    showError(MSG_NOT_CONNECTED);
+    return;
+  }
+
+  const content = messageInput.value;
+  socket.emit("message", { content: content });
+
+  messageInput.value = "";
+  updateCharCounter();
+  messageInput.focus();
+}
+
+// Send button (form submit) and Enter key handling
+if (messageForm) {
+  messageForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    sendMessage();
+  });
+}
+
+if (messageInput) {
+  messageInput.addEventListener("keydown", (e) => {
+    // Enter sends; Shift+Enter inserts a new line; ignore Enter while an IME is composing
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+  messageInput.addEventListener("input", updateCharCounter);
 }
 
 // Connect to the WebSocket server using the supplied username
@@ -83,6 +209,9 @@ function connectToServer(username) {
   // Fired when server sends acknowledgment payload
   socket.on("ack", (data) => {
     console.log("Server acknowledgment:", data);
+    if (data && typeof data.username === "string") {
+      currentUsername = data.username;
+    }
   });
 
   // Fired when the connection is refused or fails (BL-03)

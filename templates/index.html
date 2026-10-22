@@ -17,7 +17,7 @@
       </div>
     </header>
 
-    <div id="error-banner" class="error-banner" hidden></div>
+    <div id="error-banner" class="error-banner" role="alert" aria-live="polite" hidden></div>
 
     <section class="controls">
       <label for="username">Username:</label>
@@ -25,8 +25,21 @@
       <button id="connect-btn" type="button">Connect</button>
     </section>
 
-    <main id="chat-area" class="chat-placeholder">
-      chat UI is built in BL-04
+    <!-- BL-04: Chat area (message list + composer) -->
+    <main id="chat-area" class="chat-area">
+      <ol id="message-list" class="message-list" aria-live="polite" aria-label="Chat messages">
+        <li id="empty-state" class="empty-state">No messages yet. Say hello!</li>
+      </ol>
+
+      <form id="message-form" class="message-form" autocomplete="off" novalidate>
+        <label for="message-input" class="visually-hidden">Message</label>
+        <textarea id="message-input" class="message-input" rows="1" maxlength="500"
+                  placeholder="Type a message..."
+                  title="Enter to send, Shift+Enter for a new line"
+                  disabled></textarea>
+        <button id="send-btn" class="send-btn" type="submit" disabled>Send</button>
+      </form>
+      <div id="char-counter" class="char-counter" aria-live="off">0 / 500</div>
     </main>
   </div>
 
