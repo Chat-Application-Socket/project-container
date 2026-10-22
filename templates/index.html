@@ -4,9 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Chat Application (Socket Programming)</title>
+  <!-- Inline empty favicon to prevent 404 delays -->
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css">
-  <!-- Pinned official Socket.IO client v4.7.5 -->
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <!-- Preconnect to CDN to accelerate DNS and TLS handshake -->
+  <link rel="preconnect" href="https://cdn.socket.io">
 </head>
 <body>
   <div class="container">
@@ -43,6 +45,8 @@
     </main>
   </div>
 
+  <!-- Pinned official Socket.IO client v4.7.5 loaded at end of body so UI paints immediately -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="/static/messages.js"></script>
   <script src="/static/client.js"></script>
 </body>
