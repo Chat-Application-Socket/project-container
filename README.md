@@ -27,12 +27,14 @@ over dedicated WebSocket connections without long-polling fallbacks.
 | `chat/connection.py` | Connection lifecycle management, handshake auth validation, and connected user registry | REQ-1, REQ-2, BL-02, BL-03 |
 | `chat/rooms.py` | Room management module stub (default global room, join/leave handlers) | BL-14 (Sprint 2) |
 | `chat/broadcast.py` | Message broadcasting module stub (delivering messages to rooms) | BL-05 |
+| `chat/validator.py` | Server-side message validation: rejects empty / whitespace-only messages with error `E304` and provides the `@reject_empty_message` decorator for the `message` handler | REQ-5, BL-07 |
 | `templates/index.html` | Chat UI template with status badge, controls, error banner, message list and message input with Send button | REQ-1, REQ-2, BL-01, BL-02, BL-04 |
 | `static/client.js` | Client-side Socket.IO client logic (WebSocket-only transport, XSS-safe rendering, Send button / Enter key, message rendering) | REQ-1, REQ-2, NFR-SEC-2, BL-02, BL-03, BL-04 |
 | `static/style.css` | UI styling for chat container, status indicators, error banners, message list and responsive (phone width) layout | BL-01, BL-02, BL-04 |
 | `tests/test_smoke.py` | Basic smoke test verifying application factory creation | BL-01 |
 | `tests/test_connection.py` | Pytest test suite testing connection handshakes, refusals, and disconnections | REQ-1, REQ-2, BL-02, BL-03 |
 | `tests/test_chat_ui.py` | Checks the chat page contains the message list, input, Send button, error banner and mobile viewport | BL-04 |
+| `tests/test_message_validation.py` | Unit and integration tests for empty / whitespace-only message rejection (UT-05A to UT-05C, IT-05B) | REQ-5, BL-07 |
 
 ## Setup Steps
 
@@ -73,6 +75,18 @@ Then open your web browser at:
 - Type in the message box at the bottom and press **Enter** or click **Send**. Use **Shift+Enter** for a new line.
 - Messages appear in the message area with the sender, the text and the time. The message box and Send button are disabled while disconnected.
 - Problems (server unreachable, rejected username, rejected message) are shown in the red banner at the top.
+- Empty or whitespace-only messages are blocked: the page shows *Type a message first.* and sends nothing. The server checks again and answers a blank message with an `error` event (`E304`, *Message cannot be empty.*) without broadcasting it.
+
+### Message validation contract (for the `message` handler)
+The `message` event handler must be wrapped with `@reject_empty_message` from `chat/validator.py`, so blank messages are rejected on the server even when the UI is bypassed:
+```python
+from chat.validator import reject_empty_message
+
+@socketio.on("message")
+@reject_empty_message
+def handle_message(data):
+    content = data["content"]  # already trimmed and never empty
+```
 
 To override the default port, set the `PORT` environment variable:
 ```bash

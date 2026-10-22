@@ -34,6 +34,18 @@ const charCounter = document.getElementById("char-counter");
 // Limits and client-local messages (SAD 4.4.2, Table 15)
 const MAX_MESSAGE_LENGTH = 500;
 const MSG_NOT_CONNECTED = "You are not connected."; // C05
+const MSG_EMPTY_INPUT = "Type a message first."; // C04 (BL-07)
+
+// BL-07: Characters that render as nothing. String.prototype.trim() already
+// removes normal whitespace; these zero-width characters are removed as well so
+// the client applies the same rule as the server validator (chat/validator.py).
+const INVISIBLE_CHARS = /[​‌‍⁠﻿]/g;
+
+// BL-07: True when the text is empty or contains only whitespace / invisible characters
+function isBlankMessage(text) {
+  if (typeof text !== "string") return true;
+  return text.replace(INVISIBLE_CHARS, "").trim().length === 0;
+}
 
 // Username confirmed by the server in the "ack" event (used to highlight own messages)
 let currentUsername = null;
@@ -148,13 +160,24 @@ function updateCharCounter() {
 function sendMessage() {
   if (!messageInput) return;
 
+  // BL-07: Block empty / whitespace-only input before anything is sent (C04).
+  // Nothing is emitted, the box keeps focus, and the user sees a short hint.
+  if (isBlankMessage(messageInput.value)) {
+    messageInput.value = "";
+    updateCharCounter();
+    showError(MSG_EMPTY_INPUT);
+    messageInput.focus();
+    return;
+  }
+
   if (!socket || !socket.connected) {
     showError(MSG_NOT_CONNECTED);
     return;
   }
 
-  const content = messageInput.value;
+  const content = messageInput.value.trim();
   socket.emit("message", { content: content });
+  showError("");
 
   messageInput.value = "";
   updateCharCounter();
@@ -177,7 +200,13 @@ if (messageInput) {
       sendMessage();
     }
   });
-  messageInput.addEventListener("input", updateCharCounter);
+  messageInput.addEventListener("input", () => {
+    updateCharCounter();
+    // BL-07: Hide the "Type a message first." hint once the user starts typing
+    if (errorBanner && errorBanner.textContent === MSG_EMPTY_INPUT && !isBlankMessage(messageInput.value)) {
+      showError("");
+    }
+  });
 }
 
 // Connect to the WebSocket server using the supplied username
@@ -212,6 +241,16 @@ function connectToServer(username) {
     if (data && typeof data.username === "string") {
       currentUsername = data.username;
     }
+  });
+
+  // BL-07: Server rejected one of our requests, e.g. an empty message sent outside the UI.
+  // Payload is {code, message, event}; only the fixed, readable message is shown.
+  socket.on("error", (data) => {
+    let message = "Something went wrong. Please retry.";
+    if (data && typeof data === "object" && typeof data.message === "string" && data.message) {
+      message = data.message;
+    }
+    showError(message);
   });
 
   // Fired when the connection is refused or fails (BL-03)
