@@ -147,6 +147,71 @@ function renderMessage(msg) {
   return item;
 }
 
+/* ===========================================================================
+ * BL-08: Render received messages live, in order, without page refresh
+ * ======================================================================== */
+
+// Ordered, de-duplicated list of received messages (static/messages.js)
+const messageStore = typeof MessageStore === "function" ? new MessageStore() : null;
+
+// How close (in px) to the bottom counts as "reading the latest messages"
+const AUTO_SCROLL_THRESHOLD_PX = 80;
+
+function isNearBottom() {
+  if (!messageList) return true;
+  const distance = messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight;
+  return distance <= AUTO_SCROLL_THRESHOLD_PX;
+}
+
+function scrollToLatest() {
+  if (!messageList) return;
+  messageList.scrollTop = messageList.scrollHeight;
+}
+
+// Insert a message at a given position of the list (index from MessageStore)
+function renderMessageAt(msg, index) {
+  if (!messageList) return null;
+  if (emptyState && emptyState.parentNode) {
+    emptyState.parentNode.removeChild(emptyState);
+  }
+  const item = createMessageElement(msg);
+  const nextItem = messageList.children[index] || null;
+  messageList.insertBefore(item, nextItem);
+  return item;
+}
+
+// Called for every "message" event pushed by the server (no polling, no refresh).
+// The view follows new messages if the user is already at the bottom or the
+// message is their own; if they scrolled up to read older ones, it stays put.
+function handleIncomingMessage(msg) {
+  if (!msg || typeof msg !== "object") return;
+
+  const followLatest = isNearBottom() || (currentUsername && msg.sender === currentUsername);
+
+  let item;
+  if (messageStore) {
+    const index = messageStore.add(msg);
+    if (index === -1) return; // duplicate or invalid: never shown twice
+    item = renderMessageAt(msg, index);
+  } else {
+    item = renderMessage(msg);
+  }
+
+  if (item && followLatest) {
+    scrollToLatest();
+  }
+}
+
+// Empty the message area (used when the user starts a new connection)
+function clearMessages() {
+  if (messageStore) messageStore.clear();
+  if (!messageList) return;
+  while (messageList.firstChild) {
+    messageList.removeChild(messageList.firstChild);
+  }
+  if (emptyState) messageList.appendChild(emptyState);
+}
+
 // Keep the "n / 500" counter in sync with the input box
 function updateCharCounter() {
   if (!charCounter || !messageInput) return;
@@ -221,6 +286,9 @@ function connectToServer(username) {
     socket = null;
   }
 
+  // BL-08: A new connection starts with an empty message area
+  clearMessages();
+
   // Auto-reconnect is deferred to Sprint 2 (BL-21). Keep reconnection: false
   // so handshake errors remain visible to the user.
   socket = io({
@@ -240,6 +308,17 @@ function connectToServer(username) {
     console.log("Server acknowledgment:", data);
     if (data && typeof data.username === "string") {
       currentUsername = data.username;
+    }
+  });
+
+  // BL-08: Server pushes each chat message as a "message" event:
+  // {id, type, sender, room, content, timestamp, seq}. Render it straight away.
+  socket.on("message", (data) => {
+    try {
+      handleIncomingMessage(data);
+    } catch (err) {
+      // A bad event must never break the page (SAD 4.4)
+      console.error("Could not display message:", err);
     }
   });
 
