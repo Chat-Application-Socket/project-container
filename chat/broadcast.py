@@ -4,6 +4,7 @@ Handles broadcasting real-time chat messages to rooms.
 """
 
 from datetime import datetime, timezone
+
 import uuid
 
 from flask import request
@@ -74,6 +75,7 @@ def register(socketio):
             "sender": username,
             "room": room,
             "content": content,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "type": "message",
         }
         emit("new_message", message, to=room)
