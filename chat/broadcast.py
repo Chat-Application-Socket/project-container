@@ -2,6 +2,7 @@
 """Message broadcasting module for chat application."""
 
 from datetime import datetime, timezone
+
 import uuid
 
 from flask import request

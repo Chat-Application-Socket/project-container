@@ -22,6 +22,7 @@ const statusEl = document.getElementById("status");
 const usernameInput = document.getElementById("username");
 const connectBtn = document.getElementById("connect-btn");
 const errorBanner = document.getElementById("error-banner");
+const messageList = document.getElementById("message-list");
 
 // BL-04: Chat area elements
 const messageList = document.getElementById("message-list");
@@ -332,6 +333,39 @@ function connectToServer(username) {
     showError(message);
   });
 
+// Display incoming messages with the server-generated timestamp.
+  socket.on("new_message", (message) => {
+    if (!messageList || !message || typeof message !== "object") {
+      return;
+    }
+
+    const item = document.createElement("li");
+    const timestamp = document.createElement("time");
+    const text = document.createElement("span");
+
+    const sender =
+      typeof message.sender === "string" ? message.sender : "Unknown";
+
+    const content =
+      typeof message.content === "string" ? message.content : "";
+
+    if (typeof message.timestamp === "string") {
+      timestamp.dateTime = message.timestamp;
+
+      const date = new Date(message.timestamp);
+      timestamp.textContent = Number.isNaN(date.getTime())
+        ? message.timestamp
+        : date.toLocaleString();
+    } else {
+      timestamp.textContent = "Time unavailable";
+    }
+
+    text.textContent = ` ${sender}: ${content}`;
+
+    item.appendChild(timestamp);
+    item.appendChild(text);
+    messageList.appendChild(item);
+  });
   // Fired when the connection is refused or fails (BL-03)
   socket.on("connect_error", (err) => {
     updateStatus("Disconnected", false);
