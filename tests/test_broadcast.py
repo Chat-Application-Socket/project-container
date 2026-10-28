@@ -63,9 +63,20 @@ def test_broadcast_ignores_invalid_messages():
     sender.emit("send_message", {"room": "", "content": "Hello"})
     sender.emit("send_message", {"room": "room1", "content": "x" * 501})
 
+    # Invalid messages must not reach other clients.
     assert not any(
         event["name"] == "new_message"
         for event in receiver.get_received()
+    )
+    assert not any(
+        event["name"] == "new_message"
+        for event in outsider.get_received()
+    )
+
+    # The sender must receive an error.
+    assert any(
+        event["name"] == "error"
+        for event in sender.get_received()
     )
 
     sender.disconnect()
