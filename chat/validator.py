@@ -1,31 +1,5 @@
-"""Message validation module (SAD component S4: Validator).
 
-BL-07 / REQ-5: Reject empty or whitespace-only messages.
-
-This module is the server-side authority for the "message cannot be empty"
-rule (SAD ADR-5: validate on the client for instant feedback, and again on the
-server because a client can be bypassed with a raw socket script).
-
-It exposes:
-1. validate_message_content(content)
-     Pure function: returns the trimmed text or raises MessageValidationError.
-2. reject_empty_message
-     Decorator for the "message" event handler. When the content is empty,
-     whitespace-only or not text, it sends a standard error event back to the
-     sender only, and the wrapped handler is NOT called (so nothing is
-     broadcast). Valid messages reach the handler with content already trimmed.
-
-Usage in the message handler (chat/broadcast.py, BL-05):
-
-    from chat.validator import reject_empty_message
-
-    def register(socketio):
-        @socketio.on("message")
-        @reject_empty_message
-        def handle_message(data):
-            content = data["content"]  # guaranteed non-empty, trimmed
-            ...
-"""
+"""Message validation module for chat application."""
 
 import functools
 import logging
@@ -35,27 +9,18 @@ from flask_socketio import emit
 
 logger = logging.getLogger(__name__)
 
-# Event used to tell a client its request was rejected (SAD 4.3.4).
 ERROR_EVENT = "error"
-
-# Client -> server event this validator protects (SAD 4.3.3).
 MESSAGE_EVENT = "message"
 
-# Error catalogue entries used by this module (SAD 4.4.2, Table 14).
-# Messages are fixed, user-readable text with no internals (SC-9).
 E201_INVALID_REQUEST = ("E201", "Invalid request.")
 E304_EMPTY_MESSAGE = ("E304", "Message cannot be empty.")
 
-# Invisible characters that str.strip() does not remove but which still render
-# as a blank message (zero-width space/joiners, word joiner, byte order mark).
 _INVISIBLE_CHARS = "​‌‍⁠﻿"
+VALID_MESSAGE_TYPES = {"message", "join", "leave", "typing"}
 
 
 class MessageValidationError(ValueError):
-    """Raised when a message fails validation.
-
-    Carries an error code and a fixed, user-readable message.
-    """
+    """Raised when a message fails validation."""
 
     def __init__(self, error):
         code, message = error
@@ -64,27 +29,16 @@ class MessageValidationError(ValueError):
         self.message = message
 
     def to_payload(self, event=MESSAGE_EVENT):
-        """Build the standard error event payload {code, message, event}."""
-        return {"code": self.code, "message": self.message, "event": event}
+        """Build the standard error event payload."""
+        return {
+            "code": self.code,
+            "message": self.message,
+            "event": event,
+        }
 
 
 def validate_message_content(content):
-    """Validate message text and return it trimmed.
-
-    Rules (REQ-5 / Test Plan UT-05A to UT-05C):
-    - content must be a string, otherwise E201 "Invalid request."
-    - content must not be empty or whitespace-only after trimming,
-      otherwise E304 "Message cannot be empty."
-
-    Args:
-        content: The raw "content" value received from the client.
-
-    Returns:
-        str: The content with leading and trailing whitespace removed.
-
-    Raises:
-        MessageValidationError: If the content is not text or is blank.
-    """
+    """Validate message text and return it trimmed."""
     if content is None:
         raise MessageValidationError(E304_EMPTY_MESSAGE)
 
@@ -99,13 +53,7 @@ def validate_message_content(content):
 
 
 def reject_empty_message(handler):
-    """Decorator that stops empty / invalid messages before the handler runs.
-
-    On a bad message the sender alone receives an "error" event, the event is
-    logged without its content (SC-10), and the wrapped handler is skipped,
-    so the message is never broadcast. Bad input never raises out of the
-    handler, so the server keeps running (no crash on bad input).
-    """
+    """Reject invalid or empty message content before handling."""
 
     @functools.wraps(handler)
     def wrapper(data=None, *args, **kwargs):
@@ -114,6 +62,7 @@ def reject_empty_message(handler):
         else:
             error = None
             content = (data or {}).get("content")
+
             try:
                 cleaned = validate_message_content(content)
             except MessageValidationError as exc:
@@ -121,7 +70,9 @@ def reject_empty_message(handler):
 
         if error is not None:
             logger.info(
-                "Message rejected: sid=%s code=%s", request.sid, error.code
+                "Message rejected: sid=%s code=%s",
+                request.sid,
+                error.code,
             )
             emit(ERROR_EVENT, error.to_payload(MESSAGE_EVENT))
             return None
@@ -131,3 +82,58 @@ def reject_empty_message(handler):
         return handler(validated, *args, **kwargs)
 
     return wrapper
+
+
+def validate_message_object(message):
+    """Validate a complete message object against the BL-09 schema."""
+    if not isinstance(message, dict):
+        raise MessageValidationError(E201_INVALID_REQUEST)
+
+    required_fields = {
+        "sender",
+        "room",
+        "content",
+        "timestamp",
+        "type",
+    }
+
+    if not required_fields.issubset(message):
+        raise MessageValidationError(E201_INVALID_REQUEST)
+
+    sender = message["sender"]
+    room = message["room"]
+    content = message["content"]
+    timestamp = message["timestamp"]
+    message_type = message["type"]
+
+    if (
+        not isinstance(sender, str)
+        or not sender.strip()
+        or len(sender) > 50
+    ):
+        raise MessageValidationError(E201_INVALID_REQUEST)
+
+    if (
+        not isinstance(room, str)
+        or not room.strip()
+        or len(room) > 30
+    ):
+        raise MessageValidationError(E201_INVALID_REQUEST)
+
+    if (
+        not isinstance(content, str)
+        or not content.strip()
+        or len(content) > 500
+    ):
+        raise MessageValidationError(E201_INVALID_REQUEST)
+
+    if not isinstance(timestamp, str) or not timestamp.strip():
+        raise MessageValidationError(E201_INVALID_REQUEST)
+
+    if (
+        not isinstance(message_type, str)
+        or message_type not in VALID_MESSAGE_TYPES
+    ):
+        raise MessageValidationError(E201_INVALID_REQUEST)
+
+    return message
