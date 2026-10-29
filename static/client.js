@@ -25,7 +25,6 @@ const errorBanner = document.getElementById("error-banner");
 const messageList = document.getElementById("message-list");
 
 // BL-04: Chat area elements
-const messageList = document.getElementById("message-list");
 const emptyState = document.getElementById("empty-state");
 const messageForm = document.getElementById("message-form");
 const messageInput = document.getElementById("message-input");
