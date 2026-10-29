@@ -120,3 +120,73 @@ A backlog item is completed only when:
 3. Automated unit and integration tests are written and passing locally and in CI (`pytest`).
 4. Documentation and README instructions are updated to reflect any new behavior or configuration.
 5. Branch is pushed, a Pull Request is opened with `Closes #<issue>`, peer reviewed, and merged.
+
+## Production HTTPS / WSS (BL-23)
+
+In production, serve the chat application over HTTPS and use TLS to encrypt WebSocket traffic in transit. A recommended setup is Nginx as a reverse proxy with a valid TLS certificate, forwarding WebSocket connections to the Flask-SocketIO application.
+
+### Client connection behavior
+
+The client uses a relative Socket.IO URL:
+
+```javascript
+socket = io({
+  transports: ["websocket"],
+  auth: { username: username },
+  reconnection: false,
+});
+```
+
+Because the URL is relative to the current page, the browser uses the page's origin and scheme. When the page is served over HTTPS, the WebSocket connection uses `wss://`. When running locally over HTTP, it uses `ws://`. WebSocket-only transport remains enforced; HTTP long-polling is not enabled.
+
+### Production setup with Nginx
+
+1. Deploy the application on a Linux server with a domain name pointing to that server.
+2. Install Nginx and obtain a valid TLS certificate for the domain, for example using Certbot.
+3. Configure Nginx to terminate TLS and proxy WebSocket requests to the Flask-SocketIO application.
+4. Keep the application's backend port private. Configure the server firewall to prevent public access to port 5000; expose HTTPS through Nginx instead.
+
+Example Nginx server configuration (replace `chat.example.com` and certificate paths with your actual values):
+
+```nginx
+server {
+    listen 80;
+    server_name chat.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name chat.example.com;
+
+    ssl_certificate /etc/letsencrypt/live/chat.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/chat.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+```
+
+### Start and verify
+
+1. Start the Flask-SocketIO application using the project's normal startup command.
+2. Configure Nginx with the server block above, validate the configuration with `sudo nginx -t`, and reload Nginx.
+3. Open `https://chat.example.com` in a browser and connect to the chat.
+4. In the browser's Developer Tools, open the Network tab and filter for WS (WebSocket). Confirm that the connection uses `wss://` and completes successfully.
+5. Send a message and confirm that it reaches the other connected client.
+6. Confirm that the application backend port is not publicly accessible and that HTTP requests to the domain redirect to HTTPS.
+
+A successful local test does not prove production TLS is configured. Verify the deployed domain, certificate, WebSocket connection, and firewall separately.
