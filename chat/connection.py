@@ -85,7 +85,20 @@ def register(socketio):
 
     @socketio.on("disconnect")
     def handle_disconnect():
-        """Handle client disconnection and clean up user state."""
+        """Handle client disconnection and clean up user state (BL-15 notice on disconnect)."""
         sid = request.sid
         username = connected_users.pop(sid, None)
         logger.info("Client disconnected: sid=%s user=%s", sid, username)
+
+        # Notify room members when a user disconnects (BL-15)
+        from chat.rooms import remove_user_from_room
+        from datetime import datetime, timezone
+        old_room = remove_user_from_room(sid)
+        if old_room and username:
+            emit("system", {
+                "type": "leave",
+                "sender": username,
+                "room": old_room,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "message": f"{username} left the room",
+            }, to=old_room)

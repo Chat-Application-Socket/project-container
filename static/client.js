@@ -24,6 +24,13 @@ const connectBtn = document.getElementById("connect-btn");
 const errorBanner = document.getElementById("error-banner");
 const messageList = document.getElementById("message-list");
 
+// BL-14 & BL-15: Room elements
+const roomInput = document.getElementById("room-input");
+const joinRoomBtn = document.getElementById("join-room-btn");
+const leaveRoomBtn = document.getElementById("leave-room-btn");
+const currentRoomBadge = document.getElementById("current-room-badge");
+let currentRoom = null;
+
 // BL-04: Chat area elements
 const emptyState = document.getElementById("empty-state");
 const messageForm = document.getElementById("message-form");
@@ -68,15 +75,25 @@ function showError(message) {
   }
 }
 
+// BL-14 & BL-15: Room control enabling
+function setRoomControlsEnabled(enabled, inRoom = false) {
+  if (joinRoomBtn) joinRoomBtn.disabled = !enabled;
+  if (leaveRoomBtn) leaveRoomBtn.disabled = !enabled || !inRoom;
+  if (roomInput) roomInput.disabled = !enabled;
+}
+
 // Update connection status label and toggle button label
 function updateStatus(statusText, isConnected) {
   setComposerEnabled(isConnected);
+  setRoomControlsEnabled(isConnected, Boolean(currentRoom));
   if (!statusEl) return;
   statusEl.textContent = statusText;
   if (isConnected) {
     statusEl.classList.add("connected");
     if (connectBtn) connectBtn.textContent = "Disconnect";
   } else {
+    currentRoom = null;
+    if (currentRoomBadge) currentRoomBadge.textContent = "Room: none";
     statusEl.classList.remove("connected");
     if (connectBtn) connectBtn.textContent = "Connect";
   }
@@ -145,6 +162,30 @@ function renderMessage(msg) {
   const item = createMessageElement(msg);
   messageList.appendChild(item);
   return item;
+}
+
+// BL-15: Render system join/leave notices safely using textContent (NFR-SEC-2)
+function renderSystemNotice(text, timestamp) {
+  if (!messageList || !text) return;
+  if (emptyState && emptyState.parentNode) {
+    emptyState.parentNode.removeChild(emptyState);
+  }
+  const item = document.createElement("li");
+  item.className = "message system";
+  const content = document.createElement("span");
+  content.textContent = text;
+  item.appendChild(content);
+
+  if (timestamp) {
+    const time = document.createElement("time");
+    time.className = "message-time";
+    time.setAttribute("datetime", String(timestamp));
+    time.textContent = ` (${formatTimestamp(timestamp)})`;
+    item.appendChild(time);
+  }
+
+  messageList.appendChild(item);
+  scrollToLatest();
 }
 
 /* ===========================================================================
@@ -301,6 +342,32 @@ function connectToServer(username) {
   socket.on("connect", () => {
     updateStatus("Connected", true);
     showError("");
+    // Automatically join default room (BL-14)
+    socket.emit("join_room", { room: "global" });
+  });
+
+  // BL-14: Acknowledged room join
+  socket.on("joined", (data) => {
+    if (data && typeof data.room === "string") {
+      currentRoom = data.room;
+      if (currentRoomBadge) currentRoomBadge.textContent = `Room: ${data.room}`;
+      if (roomInput) roomInput.value = data.room;
+      setRoomControlsEnabled(true, true);
+    }
+  });
+
+  // BL-15: Acknowledged room leave
+  socket.on("left", (data) => {
+    currentRoom = null;
+    if (currentRoomBadge) currentRoomBadge.textContent = "Room: none";
+    setRoomControlsEnabled(true, false);
+  });
+
+  // BL-15: System notification for user join / leave
+  socket.on("system", (data) => {
+    if (data && typeof data.message === "string") {
+      renderSystemNotice(data.message, data.timestamp);
+    }
   });
 
   // Fired when server sends acknowledgment payload
@@ -400,6 +467,38 @@ if (connectBtn) {
       const enteredName = usernameInput ? usernameInput.value : "";
       connectToServer(enteredName);
     }
+  });
+}
+
+// BL-14 & BL-15: Join and Leave Room button handlers
+if (joinRoomBtn) {
+  joinRoomBtn.addEventListener("click", () => {
+    if (!socket || !socket.connected) {
+      showError(MSG_NOT_CONNECTED);
+      return;
+    }
+    const enteredRoom = roomInput ? roomInput.value.trim() : "";
+    if (!enteredRoom) {
+      showError("Room name cannot be empty.");
+      return;
+    }
+    if (enteredRoom.length > 30) {
+      showError("Room name must not exceed 30 characters.");
+      return;
+    }
+    showError("");
+    socket.emit("join_room", { room: enteredRoom });
+  });
+}
+
+if (leaveRoomBtn) {
+  leaveRoomBtn.addEventListener("click", () => {
+    if (!socket || !socket.connected) {
+      showError(MSG_NOT_CONNECTED);
+      return;
+    }
+    showError("");
+    socket.emit("leave_room", {});
   });
 }
 

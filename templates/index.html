@@ -27,6 +27,15 @@
       <button id="connect-btn" type="button">Connect</button>
     </section>
 
+    <!-- BL-14 & BL-15: Room controls -->
+    <section class="room-controls">
+      <label for="room-input">Room:</label>
+      <input type="text" id="room-input" placeholder="Room name" maxlength="30" value="global" autocomplete="off">
+      <button id="join-room-btn" type="button" disabled>Join</button>
+      <button id="leave-room-btn" type="button" disabled>Leave</button>
+      <span id="current-room-badge" class="room-badge">Room: none</span>
+    </section>
+
     <!-- BL-04: Chat area (message list + composer) -->
     <main id="chat-area" class="chat-area">
       <ol id="message-list" class="message-list" aria-live="polite" aria-label="Chat messages">
