@@ -1,6 +1,6 @@
 """Room management module for chat application.
 
-Handles room membership, joining, and leaving rooms (BL-14, BL-15).
+Handles room membership, joining, leaving, and single room enforcement (BL-14, BL-15, BL-16).
 """
 
 from datetime import datetime, timezone
@@ -62,7 +62,7 @@ def register(socketio):
 
     @socketio.on("join_room")
     def handle_join_room(data):
-        """Handle client request to join a named room (REQ-6 / BL-14)."""
+        """Handle client request to join a named room (REQ-6, REQ-10 / BL-14, BL-16)."""
         sid = request.sid
         username = connected_users.get(sid)
         if not username:

@@ -54,8 +54,10 @@
     </main>
   </div>
 
-  <!-- Pinned official Socket.IO client v4.7.5 loaded at end of body so UI paints immediately -->
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <!-- Instant local load for offline/firewalled networks -->
+  <script src="/static/socket.io.min.js"></script>
+  <!-- Official CDN script with defer so it never blocks page load -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" defer></script>
   <script src="/static/messages.js"></script>
   <script src="/static/client.js"></script>
 </body>
