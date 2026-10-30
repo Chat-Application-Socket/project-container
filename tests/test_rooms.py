@@ -1,9 +1,10 @@
-"""Tests for Room management and notifications (BL-14, BL-15).
+"""Tests for Room management and notifications (BL-14, BL-15, BL-16).
 
 Maps to:
 - REQ-6 / Test Plan REQ-04 (BL-14): Join named room, room scoping, room name validation
 - REQ-7 / Test Plan REQ-05, REQ-06 (BL-15): Member join/leave notifications, leave button,
   and disconnect notices
+- REQ-10 / SRS 5.5 Business Rules (BL-16): Enforce one room at a time per user
 """
 
 import pytest
@@ -228,7 +229,7 @@ def test_disconnect_fires_leave_notice_to_room(app):
 
 
 def test_joining_new_room_leaves_old_room(app):
-    """BL-14 / BL-15: Joining a new room automatically leaves the old room with notice."""
+    """BL-14 / BL-15 / BL-16: Joining a new room automatically leaves the old room with notice."""
     c1 = socketio.test_client(app, auth={"username": "Alice"})
     c2 = socketio.test_client(app, auth={"username": "Bob"})
 
@@ -255,3 +256,44 @@ def test_joining_new_room_leaves_old_room(app):
 
     c1.disconnect()
     c2.disconnect()
+
+
+def test_enforce_one_room_at_a_time_messages_not_received_from_old_room(app):
+    """BL-16: User who switched rooms only receives messages in their current room."""
+    c1 = socketio.test_client(app, auth={"username": "Alice"})
+    c2 = socketio.test_client(app, auth={"username": "Bob"})
+    c3 = socketio.test_client(app, auth={"username": "Charlie"})
+
+    # Alice and Bob join roomA
+    c1.emit("join_room", {"room": "roomA"})
+    c2.emit("join_room", {"room": "roomA"})
+    # Charlie in roomB
+    c3.emit("join_room", {"room": "roomB"})
+
+    c1.get_received()
+    c2.get_received()
+    c3.get_received()
+
+    # Alice switches from roomA to roomB
+    c1.emit("join_room", {"room": "roomB"})
+    c1.get_received()
+
+    # Bob sends message to roomA
+    c2.emit("message", {"content": "Message in roomA"})
+
+    # Charlie sends message to roomB
+    c3.emit("message", {"content": "Message in roomB"})
+
+    alice_messages = [
+        get_event_payload(e) for e in c1.get_received()
+        if e["name"] == "message"
+    ]
+
+    # Alice must only receive message from roomB, never roomA
+    assert len(alice_messages) == 1
+    assert alice_messages[0]["room"] == "roomB"
+    assert alice_messages[0]["content"] == "Message in roomB"
+
+    c1.disconnect()
+    c2.disconnect()
+    c3.disconnect()
