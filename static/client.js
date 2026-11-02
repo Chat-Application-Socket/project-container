@@ -30,6 +30,9 @@ const joinRoomBtn = document.getElementById("join-room-btn");
 const leaveRoomBtn = document.getElementById("leave-room-btn");
 const currentRoomBadge = document.getElementById("current-room-badge");
 let currentRoom = null;
+let typingTimeout = null;
+const typingUsers = {};
+let isTyping = false;
 
 // BL-04: Chat area elements
 const emptyState = document.getElementById("empty-state");
@@ -37,6 +40,7 @@ const messageForm = document.getElementById("message-form");
 const messageInput = document.getElementById("message-input");
 const sendBtn = document.getElementById("send-btn");
 const charCounter = document.getElementById("char-counter");
+const typingIndicator = document.getElementById("typing-indicator");
 
 // Limits and client-local messages (SAD 4.4.2, Table 15)
 const MAX_MESSAGE_LENGTH = 500;
@@ -380,6 +384,47 @@ function updateCharCounter() {
   charCounter.classList.toggle("near-limit", length >= MAX_MESSAGE_LENGTH - 50);
 }
 
+function clearTypingIndicator(username) {
+  if (typingUsers[username]) {
+    clearTimeout(typingUsers[username]);
+    delete typingUsers[username];
+  }
+  renderTypingIndicator();
+}
+
+function renderTypingIndicator() {
+  if (!typingIndicator) return;
+  const names = Object.keys(typingUsers);
+  typingIndicator.textContent = names.length === 0
+    ? ""
+    : names.length === 1
+      ? names[0] + " is typing..."
+      : names.join(", ") + " are typing...";
+}
+
+function stopTyping() {
+  if (typingTimeout) {
+    clearTimeout(typingTimeout);
+    typingTimeout = null;
+  }
+  if (isTyping && socket && socket.connected) {
+    socket.emit("stop_typing", {});
+  }
+  isTyping = false;
+}
+
+function sendTyping() {
+  if (!socket || !socket.connected || !currentRoom || !messageInput) return;
+  if (isBlankMessage(messageInput.value)) {
+    stopTyping();
+    return;
+  }
+  socket.emit("typing", {});
+  isTyping = true;
+  if (typingTimeout) clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(stopTyping, 2000);
+}
+
 // Send the text in the input box to the server.
 // The server derives sender, room and timestamp; the client sends only content (SAD ADR-2).
 function sendMessage() {
@@ -401,6 +446,7 @@ function sendMessage() {
   }
 
   const content = messageInput.value.trim();
+  stopTyping();
   socket.emit("message", { content: content });
   showError("");
 
@@ -427,6 +473,7 @@ if (messageInput) {
   });
   messageInput.addEventListener("input", () => {
     updateCharCounter();
+    sendTyping();
     // BL-07: Hide the "Type a message first." hint once the user starts typing
     if (errorBanner && errorBanner.textContent === MSG_EMPTY_INPUT && !isBlankMessage(messageInput.value)) {
       showError("");
@@ -487,6 +534,8 @@ function connectToServer(username) {
 
   // BL-14: Acknowledged room join
   socket.on("joined", (data) => {
+    stopTyping();
+    Object.keys(typingUsers).forEach(clearTypingIndicator);
     if (data && typeof data.room === "string") {
       currentRoom = data.room;
       desiredRoom = data.room; // BL-21: rejoin this room after a reconnect
@@ -498,10 +547,26 @@ function connectToServer(username) {
 
   // BL-15: Acknowledged room leave
   socket.on("left", (data) => {
+    stopTyping();
+    Object.keys(typingUsers).forEach(clearTypingIndicator);
     currentRoom = null;
     desiredRoom = null; // BL-21: user left on purpose; do not rejoin it
     if (currentRoomBadge) currentRoomBadge.textContent = "Room: none";
     setRoomControlsEnabled(true, false);
+  });
+
+  // BL-19: Show typing activity from other members of the current room.
+  socket.on("user_typing", (data) => {
+    if (!data || data.room !== currentRoom || typeof data.username !== "string" ||
+        data.username === currentUsername) return;
+    if (typingUsers[data.username]) clearTimeout(typingUsers[data.username]);
+    typingUsers[data.username] = setTimeout(() => clearTypingIndicator(data.username), 2000);
+    renderTypingIndicator();
+  });
+
+  socket.on("user_stopped_typing", (data) => {
+    if (!data || data.room !== currentRoom || typeof data.username !== "string") return;
+    clearTypingIndicator(data.username);
   });
 
   // BL-15: System notification for user join / leave
@@ -605,6 +670,10 @@ function connectToServer(username) {
 
   // Fired when an established connection ends (BL-21)
   socket.on("disconnect", (reason) => {
+    // BL-19: Clear typing state when disconnected
+    stopTyping();
+    Object.keys(typingUsers).forEach(clearTypingIndicator);
+
     if (reason === "io client disconnect") {
       // The user clicked Disconnect: no automatic reconnect
       if (reconnectScheduler) reconnectScheduler.reset();
