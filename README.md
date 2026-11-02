@@ -30,12 +30,15 @@ over dedicated WebSocket connections without long-polling fallbacks.
 | `chat/validator.py` | Server-side message validation: rejects empty / whitespace-only messages with error `E304` and provides the `@reject_empty_message` decorator for the `message` handler | REQ-5, BL-07 |
 | `templates/index.html` | Chat UI template with status badge, controls, error banner, message list and message input with Send button | REQ-1, REQ-2, BL-01, BL-02, BL-04 |
 | `static/client.js` | Client-side Socket.IO client logic (WebSocket-only transport, XSS-safe rendering, Send button / Enter key, message rendering) | REQ-1, REQ-2, NFR-SEC-2, BL-02, BL-03, BL-04 |
+| `static/reconnect.js` | Reconnection policy (no DOM): back-off `min(30 s, 1 s x 2^n)` + up to 20 % jitter, 10 attempts, which disconnects are retried, user-facing messages C01-C03 | NFR-REL-1, BL-21 |
 | `static/style.css` | UI styling for chat container, status indicators, error banners, message list and responsive (phone width) layout | BL-01, BL-02, BL-04 |
 | `tests/test_smoke.py` | Basic smoke test verifying application factory creation | BL-01 |
 | `tests/test_connection.py` | Pytest test suite testing connection handshakes, refusals, and disconnections | REQ-1, REQ-2, BL-02, BL-03 |
 | `tests/test_chat_ui.py` | Checks the chat page contains the message list, input, Send button, error banner and mobile viewport | BL-04 |
 | `tests/test_message_validation.py` | Unit and integration tests for empty / whitespace-only message rejection (UT-05A to UT-05C, IT-05B) | REQ-5, BL-07 |
 | `tests/conftest.py` | Shared fixtures: `live_server` (real server on a free port) and a minimal raw Socket.IO client that can drop its TCP connection abruptly | BL-20, BL-21, BL-22 |
+| `tests/js/test_reconnect.js` | Node.js unit tests for the reconnection policy (back-off, attempt limit, reset, manual retry) | BL-21 |
+| `tests/test_reconnect.py` | Runs the Node.js tests, checks the page wiring, and runs browser end-to-end tests (Playwright) for NT-10, NT-11, NT-12 and manual reconnect; the browser tests skip when Playwright is not installed | NFR-REL-1, BL-21 |
 | `tests/test_disconnect_cleanup.py` | Disconnect cleanup: closed sockets leave rooms and the user list, only active sessions send/receive, server survives abrupt drops and handler errors (UT-08B, IT-07C, ST-03B) | SRS 2.2, 5.5, BL-20 |
 
 ## Setup Steps
@@ -113,6 +116,24 @@ On disconnect the server:
 
 If any event handler raises an unexpected exception, the error is logged with its stack trace, the client gets `error` `{code: "E500", message: "Something went wrong. Please retry."}`, and the server keeps running.
 
+### Automatic reconnection (BL-21)
+When the connection drops (server stopped or restarted, network lost, heartbeat missed) the page:
+1. Shows **Connection lost, reconnecting...** in an amber banner with the attempt number, sets the status to *Reconnecting...* and disables Send. Text already typed in the message box is kept.
+2. Retries with exponential back-off: about 1 s, 2 s, 4 s, 8 s, 16 s, then every 30 s, each with up to 20 % random extra delay so many clients do not retry at the same moment (SAD 4.4.4).
+3. On success, rejoins the room it was in (or none, if the user had clicked **Leave**), shows *Reconnected.* in the message list, and keeps the earlier messages on screen.
+4. After 10 failed attempts, stops and shows **Could not reconnect. Click Reconnect to try again.**
+
+Manual control: while reconnecting, the button reads **Reconnect now** (skip the wait); after giving up it reads **Reconnect**. The browser's offline/online events are also used: going offline closes the dead connection immediately, coming back online retries at once.
+
+If the page is opened while the server is down, it shows **Cannot reach the server. Retrying...** and connects as soon as the server starts. What is **not** retried: clicking **Disconnect**, and a username the server refuses (the server's reason is shown instead).
+
+The browser end-to-end tests in `tests/test_reconnect.py` need Playwright, which is not in `requirements.txt`. To run them locally:
+```bash
+pip install playwright
+python -m playwright install chromium
+pytest tests/test_reconnect.py
+```
+
 ## Running Tests and Linting
 Run the test suite using pytest:
 ```bash
@@ -153,7 +174,8 @@ The client uses a relative Socket.IO URL:
 socket = io({
   transports: ["websocket"],
   auth: { username: username },
-  reconnection: false,
+  reconnection: false, // reconnecting is handled by static/reconnect.js (BL-21)
+  timeout: 5000,
 });
 ```
 
