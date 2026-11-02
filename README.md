@@ -37,6 +37,9 @@ over dedicated WebSocket connections without long-polling fallbacks.
 | `tests/test_chat_ui.py` | Checks the chat page contains the message list, input, Send button, error banner and mobile viewport | BL-04 |
 | `tests/test_message_validation.py` | Unit and integration tests for empty / whitespace-only message rejection (UT-05A to UT-05C, IT-05B) | REQ-5, BL-07 |
 | `tests/conftest.py` | Shared fixtures: `live_server` (real server on a free port) and a minimal raw Socket.IO client that can drop its TCP connection abruptly | BL-20, BL-21, BL-22 |
+| `perf/load_test.py` | Load-test script: opens N real Socket.IO WebSocket clients in one room, sends messages, measures delivery latency (p50/p95/p99/max), dropped connections and missing deliveries; presets for Test Plan NT-01 to NT-04 | NFR-PERF-1, NFR-PERF-2, BL-22 |
+| `tests/test_performance.py` | Unit tests for the load-test pass/fail rules plus a scaled-down load run (20 clients) in every CI build | NFR-PERF-1, BL-22 |
+| `docs/BL-22-Performance-Test-Results.md` | Recorded results of the NT-01 to NT-04 performance runs | NFR-PERF-1, NFR-PERF-2, BL-22 |
 | `tests/js/test_reconnect.js` | Node.js unit tests for the reconnection policy (back-off, attempt limit, reset, manual retry) | BL-21 |
 | `tests/test_reconnect.py` | Runs the Node.js tests, checks the page wiring, and runs browser end-to-end tests (Playwright) for NT-10, NT-11, NT-12 and manual reconnect; the browser tests skip when Playwright is not installed | NFR-REL-1, BL-21 |
 | `tests/test_disconnect_cleanup.py` | Disconnect cleanup: closed sockets leave rooms and the user list, only active sessions send/receive, server survives abrupt drops and handler errors (UT-08B, IT-07C, ST-03B) | SRS 2.2, 5.5, BL-20 |
@@ -133,6 +136,23 @@ pip install playwright
 python -m playwright install chromium
 pytest tests/test_reconnect.py
 ```
+
+## Performance Testing (BL-22)
+`perf/load_test.py` checks SRS 5.1: message delivery within 1 second for up to 100 concurrent users (NFR-PERF-1) and at least 100 simultaneous connections (NFR-PERF-2). It uses real Socket.IO clients over WebSocket (`websocket-client` is in `requirements.txt`).
+
+Start the server in one terminal (`python app.py`), then run a scenario in another:
+```bash
+python perf/load_test.py --scenario nt01   # 100 clients, 1 msg each every 10 s, 2 min: p95 <= 1000 ms
+python perf/load_test.py --scenario nt02   # 2 clients, 50 messages: every message <= 1000 ms
+python perf/load_test.py --scenario nt03   # 100 connections held open for 5 min: none dropped
+python perf/load_test.py --scenario nt04   # ramp to 120 connections, then chat: server stays responsive
+python perf/load_test.py --clients 50 --interval 2 --duration 30   # any custom mix
+```
+Options: `--url` (default `http://127.0.0.1:5000`), `--room`, `--json results.json` to save the full result. The script prints a Markdown table (paste it into the test report) and exits with `0` on pass, `1` on fail, `2` if the server cannot be reached.
+
+Latency is the time from a client sending a message until each *other* client in the room receives it, measured with one clock on the machine running the script. Run it on the server machine or the same LAN; the number includes the network and the client's own processing, so it is an upper bound on server time.
+
+Results of the recorded runs: [`docs/BL-22-Performance-Test-Results.md`](docs/BL-22-Performance-Test-Results.md).
 
 ## Running Tests and Linting
 Run the test suite using pytest:
