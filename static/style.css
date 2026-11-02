@@ -40,6 +40,11 @@ h1 {
   color: #28a745;
 }
 
+/* BL-21: Connecting / Reconnecting state */
+#status.reconnecting {
+  color: #b08800;
+}
+
 .error-banner {
   background-color: #ffdce0;
   color: #86181d;
@@ -48,6 +53,13 @@ h1 {
   border-radius: 4px;
   margin-bottom: 16px;
   font-size: 0.9rem;
+}
+
+/* BL-21: "Connection lost, reconnecting..." is a warning, not an error */
+.error-banner.warning {
+  background-color: #fff5b1;
+  color: #735c0f;
+  border-color: #f9c513;
 }
 
 .controls {

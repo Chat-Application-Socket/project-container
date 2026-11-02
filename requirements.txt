@@ -3,3 +3,4 @@ Flask-SocketIO==5.7.0
 simple-websocket==1.1.0
 pytest
 flake8
+websocket-client==1.8.0

@@ -5,7 +5,19 @@ from flask_socketio import SocketIO
 # SocketIO instance configured with async_mode="threading" to ensure cross-platform
 # compatibility (avoiding eventlet/gevent issues on Windows).
 # transports are restricted to "websocket" on the client side per SRS.
-socketio = SocketIO(async_mode="threading")
+#
+# BL-20: Heartbeat (SAD configuration table). The server pings each client every
+# HEARTBEAT_INTERVAL seconds and drops it if no pong arrives within
+# HEARTBEAT_TIMEOUT seconds, so a silent connection loss (cable pulled, laptop
+# asleep) is detected within about 45 s and the session is cleaned up.
+HEARTBEAT_INTERVAL = 25
+HEARTBEAT_TIMEOUT = 20
+
+socketio = SocketIO(
+    async_mode="threading",
+    ping_interval=HEARTBEAT_INTERVAL,
+    ping_timeout=HEARTBEAT_TIMEOUT,
+)
 
 
 def create_app():
