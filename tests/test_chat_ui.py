@@ -99,3 +99,12 @@ def test_client_script_and_pinned_socketio_loaded(page):
     """Page loads the pinned Socket.IO client and the app's client script."""
     assert "https://cdn.socket.io/4.7.5/socket.io.min.js" in page.scripts
     assert "/static/client.js" in page.scripts
+
+
+
+def test_typing_indicator_present_and_accessible(page):
+    """BL-19: Typing indicator is available to assistive technology."""
+    indicator = page.by_id["typing-indicator"]
+    assert indicator["_tag"] == "div"
+    assert indicator.get("role") == "status"
+    assert indicator.get("aria-live") == "polite"
