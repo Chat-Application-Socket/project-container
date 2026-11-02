@@ -74,7 +74,12 @@ def register(socketio):
             return
 
         if user_room:
-            emit("user_stopped_typing", {"username": username, "room": user_room}, to=user_room, skip_sid=sid)
+            emit(
+                "user_stopped_typing",
+                {"username": username, "room": user_room},
+                to=user_room,
+                skip_sid=sid,
+            )
             socketio.emit("message", message, to=user_room)
         else:
             socketio.emit("message", message)
