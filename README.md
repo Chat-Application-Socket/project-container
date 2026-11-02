@@ -35,6 +35,8 @@ over dedicated WebSocket connections without long-polling fallbacks.
 | `tests/test_connection.py` | Pytest test suite testing connection handshakes, refusals, and disconnections | REQ-1, REQ-2, BL-02, BL-03 |
 | `tests/test_chat_ui.py` | Checks the chat page contains the message list, input, Send button, error banner and mobile viewport | BL-04 |
 | `tests/test_message_validation.py` | Unit and integration tests for empty / whitespace-only message rejection (UT-05A to UT-05C, IT-05B) | REQ-5, BL-07 |
+| `tests/conftest.py` | Shared fixtures: `live_server` (real server on a free port) and a minimal raw Socket.IO client that can drop its TCP connection abruptly | BL-20, BL-21, BL-22 |
+| `tests/test_disconnect_cleanup.py` | Disconnect cleanup: closed sockets leave rooms and the user list, only active sessions send/receive, server survives abrupt drops and handler errors (UT-08B, IT-07C, ST-03B) | SRS 2.2, 5.5, BL-20 |
 
 ## Setup Steps
 
@@ -92,6 +94,24 @@ To override the default port, set the `PORT` environment variable:
 ```bash
 PORT=8080 python app.py
 ```
+
+## Reliability
+
+### Graceful disconnect handling (BL-20)
+Every way a session can end is handled by one cleanup path, `cleanup_session(sid)` in `chat/connection.py`:
+
+| How the session ends | How the server notices |
+| :--- | :--- |
+| User clicks **Disconnect** | Socket.IO disconnect packet |
+| Tab or browser closed, page reloaded | WebSocket / TCP close |
+| Network drop, laptop asleep, cable pulled | Heartbeat: no pong within `HEARTBEAT_TIMEOUT` (20 s) after a ping sent every `HEARTBEAT_INTERVAL` (25 s), so detection takes at most about 45 s |
+
+On disconnect the server:
+1. Removes the session from the connected-user list and from its room (an empty room is deleted). The cleanup is idempotent, so running it twice never produces a second notice or an error.
+2. Sends `{username} left the room` as a `system` event to the members who are still connected.
+3. Ignores any late event from a session that is no longer active, so a closed connection can neither send nor receive messages (business rule: disconnected users are not active).
+
+If any event handler raises an unexpected exception, the error is logged with its stack trace, the client gets `error` `{code: "E500", message: "Something went wrong. Please retry."}`, and the server keeps running.
 
 ## Running Tests and Linting
 Run the test suite using pytest:
