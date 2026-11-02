@@ -60,6 +60,14 @@ def remove_user_from_room(sid):
     return old_room
 
 
+def emit_room_users(room):
+    """Broadcast the active usernames in a room to its remaining members."""
+    emit("user_list", {
+        "room": room,
+        "members": get_room_members(room),
+    }, to=room)
+
+
 def register(socketio):
     """Register room event handlers with the SocketIO instance."""
 
@@ -112,6 +120,7 @@ def register(socketio):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "message": f"{username} left the room",
             }, to=old_room)
+            emit_room_users(old_room)
 
         # Join the new room. The session is checked again under the lock: if it
         # disconnected while this handler was running, adding it now would
@@ -122,6 +131,8 @@ def register(socketio):
             socketio_join_room(room)
             user_rooms[sid] = room
             room_members.setdefault(room, set()).add(sid)
+        # BL-17: send the updated online-users list to the room
+        emit_room_users(room)
 
         # Acknowledge join to sender
         emit("joined", {
@@ -165,3 +176,4 @@ def register(socketio):
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "message": f"{username} left the room",
         }, to=old_room)
+        emit_room_users(old_room)
