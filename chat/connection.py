@@ -174,6 +174,9 @@ def register(socketio):
                     to=old_room,
                     skip_sid=sid,
                 )
+                # BL-17: send the updated online-users list to the room
+                from chat.rooms import emit_room_users
+                emit_room_users(old_room)
         except Exception:  # pragma: no cover - defensive, logged for diagnosis
             logger.exception("Disconnect cleanup failed: sid=%s", sid)
 
