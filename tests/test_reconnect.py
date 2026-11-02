@@ -166,6 +166,11 @@ def _open_chat(browser, server, username, room=None):
     page.wait_for_function("document.getElementById('status').textContent === 'Disconnected'")
     page.click("#connect-btn")
     _wait_status(page, "Connected")
+    # Wait for the automatic join of the default room to finish; its reply
+    # fills the room box, which would otherwise overwrite the room typed below.
+    page.wait_for_function(
+        "document.getElementById('current-room-badge').textContent === 'Room: global'"
+    )
     if room:
         page.fill("#room-input", room)
         page.click("#join-room-btn")

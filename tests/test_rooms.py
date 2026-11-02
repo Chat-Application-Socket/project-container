@@ -297,3 +297,62 @@ def test_enforce_one_room_at_a_time_messages_not_received_from_old_room(app):
     c1.disconnect()
     c2.disconnect()
     c3.disconnect()
+
+
+def test_room_user_list_updates_on_join_leave_and_disconnect(app):
+    """BL-17: Room members receive the active user list after membership changes."""
+    alice = socketio.test_client(app, auth={"username": "Alice"})
+    bob = socketio.test_client(app, auth={"username": "Bob"})
+    charlie = socketio.test_client(app, auth={"username": "Charlie"})
+
+    alice.emit("join_room", {"room": "presence"})
+    alice_events = alice.get_received()
+    alice_lists = [
+        get_event_payload(e) for e in alice_events
+        if e["name"] == "user_list"
+    ]
+    assert len(alice_lists) == 1
+    assert alice_lists[0]["room"] == "presence"
+    assert alice_lists[0]["members"] == ["Alice"]
+
+    bob.emit("join_room", {"room": "presence"})
+    alice_events = alice.get_received()
+    bob_events = bob.get_received()
+    alice_lists = [
+        get_event_payload(e) for e in alice_events
+        if e["name"] == "user_list"
+    ]
+    bob_lists = [
+        get_event_payload(e) for e in bob_events
+        if e["name"] == "user_list"
+    ]
+    assert alice_lists[-1]["members"] and set(alice_lists[-1]["members"]) == {"Alice", "Bob"}
+    assert set(bob_lists[-1]["members"]) == {"Alice", "Bob"}
+
+    # A client in another room must not receive this room's presence updates.
+    charlie.emit("join_room", {"room": "elsewhere"})
+    charlie.get_received()
+    bob.emit("leave_room", {})
+    alice_events = alice.get_received()
+    updated_lists = [
+        get_event_payload(e) for e in alice_events
+        if e["name"] == "user_list"
+    ]
+    assert len(updated_lists) == 1
+    assert updated_lists[0]["members"] == ["Alice"]
+
+    # Disconnecting Alice removes her before the final list is broadcast.
+    charlie.emit("join_room", {"room": "presence"})
+    alice.get_received()
+    charlie.get_received()
+    alice.disconnect()
+    charlie_events = charlie.get_received()
+    disconnect_lists = [
+        get_event_payload(e) for e in charlie_events
+        if e["name"] == "user_list"
+    ]
+    assert len(disconnect_lists) == 1
+    assert disconnect_lists[0]["members"] == ["Charlie"]
+
+    bob.disconnect()
+    charlie.disconnect()
