@@ -1,0 +1,31 @@
+{
+  "scenario": "nt01",
+  "url": "http://127.0.0.1:5000",
+  "clients_requested": 100,
+  "clients_connected": 100,
+  "connect_failures": 0,
+  "connect_errors": [],
+  "dropped_connections": 0,
+  "messages_sent": 1200,
+  "deliveries_expected": 118800,
+  "deliveries_received": 118800,
+  "deliveries_missing": 0,
+  "server_errors": 0,
+  "latency_ms_min": 2.6,
+  "latency_ms_p50": 25.7,
+  "latency_ms_p95": 41.3,
+  "latency_ms_p99": 48.4,
+  "latency_ms_max": 79.8,
+  "over_limit": 0,
+  "connect_ms_p95": 180.3,
+  "page_load_ms": null,
+  "duration_s": 129.8,
+  "passed": true,
+  "verdict": "PASS",
+  "environment": {
+    "python": "3.13.18",
+    "platform": "Linux-6.18.44-fc-v185-x86_64-with-glibc2.39",
+    "cpu_count": 2,
+    "started_utc": "2026-11-02T05:34:44Z"
+  }
+}

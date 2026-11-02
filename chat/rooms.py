@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import re
 from flask import request
 from flask_socketio import emit, join_room as socketio_join_room, leave_room as socketio_leave_room
-from chat.connection import connected_users
+from chat.connection import connected_users, state_lock
 
 DEFAULT_ROOM = "global"
 MAX_ROOM_NAME_LENGTH = 30
@@ -40,8 +40,10 @@ def get_user_room(sid):
 
 def get_room_members(room):
     """Return the list of usernames currently in a room."""
-    sids = room_members.get(room, set())
-    return [connected_users[s] for s in sids if s in connected_users]
+    with state_lock:
+        sids = set(room_members.get(room, set()))
+        # Only sessions that are still connected count (BL-20).
+        return [connected_users[s] for s in sids if s in connected_users]
 
 
 def remove_user_from_room(sid):
@@ -49,11 +51,12 @@ def remove_user_from_room(sid):
 
     Returns the previous room name, or None.
     """
-    old_room = user_rooms.pop(sid, None)
-    if old_room and old_room in room_members:
-        room_members[old_room].discard(sid)
-        if not room_members[old_room]:
-            room_members.pop(old_room, None)
+    with state_lock:
+        old_room = user_rooms.pop(sid, None)
+        if old_room and old_room in room_members:
+            room_members[old_room].discard(sid)
+            if not room_members[old_room]:
+                room_members.pop(old_room, None)
     return old_room
 
 
@@ -119,12 +122,16 @@ def register(socketio):
             }, to=old_room)
             emit_room_users(old_room)
 
-        # Join the new room
-        socketio_join_room(room)
-        user_rooms[sid] = room
-        if room not in room_members:
-            room_members[room] = set()
-        room_members[room].add(sid)
+        # Join the new room. The session is checked again under the lock: if it
+        # disconnected while this handler was running, adding it now would
+        # leave a stale member behind (BL-20).
+        with state_lock:
+            if sid not in connected_users:
+                return
+            socketio_join_room(room)
+            user_rooms[sid] = room
+            room_members.setdefault(room, set()).add(sid)
+        # BL-17: send the updated online-users list to the room
         emit_room_users(room)
 
         # Acknowledge join to sender

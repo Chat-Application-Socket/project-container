@@ -5,10 +5,21 @@ This module handles:
 2. Validating authentication credentials passed during connection.
 3. Tracking connected clients in an in-memory dictionary.
 4. Sending connection acknowledgments (ack).
-5. Cleaning up state when clients disconnect.
+5. Cleaning up state when clients disconnect (BL-20).
+
+BL-20 - Graceful disconnect handling (SRS 2.2, 5.5 business rule "disconnected
+users are not active"; SAD 4.4.4):
+- Every way a session can end (client closes the tab, network drop detected by
+  the heartbeat, explicit disconnect, transport error) goes through the same
+  idempotent ``cleanup_session()`` so no stale session is left in a room.
+- A failure while cleaning up, or inside any other event handler, is logged and
+  never stops the server.
 """
 
 import logging
+import threading
+from datetime import datetime, timezone
+
 from flask import request
 from flask_socketio import ConnectionRefusedError, emit
 
@@ -20,13 +31,59 @@ if not logger.handlers:
 # In-memory mapping of active client connections: {socket_session_id (sid): username}
 connected_users = {}
 
+# Event handlers run on several threads (async_mode="threading"), so changes to
+# the shared session / room dictionaries are made while holding this lock.
+# RLock lets a helper that already holds it call another helper that takes it.
+state_lock = threading.RLock()
+
+# E500: unexpected server error (SAD error table). Sent to the client whose
+# event failed; the text is fixed so no internal details leak (SAD SC-10).
+E500_INTERNAL_ERROR = ("E500", "Something went wrong. Please retry.")
+
 
 def get_connected_users():
     """Return a shallow copy of the active connected users dictionary.
 
     Exposed for future backlog items (such as user lists and room logic) and unit tests.
     """
-    return dict(connected_users)
+    with state_lock:
+        return dict(connected_users)
+
+
+def is_active(sid):
+    """Return True if ``sid`` belongs to a connected, accepted session (BR: only
+    active connections may send or receive messages)."""
+    return sid in connected_users
+
+
+def cleanup_session(sid):
+    """Remove every trace of a session and return what was removed.
+
+    Safe to call more than once for the same ``sid`` (the second call finds
+    nothing and returns ``(None, None)``), so explicit disconnects, transport
+    closes and heartbeat timeouts can all use it without double notices.
+
+    Returns a tuple ``(username, room)``: the username the session had (or
+    ``None`` if it was never accepted) and the room it was in (or ``None``).
+    """
+    # Imported here to avoid a circular import (rooms imports this module).
+    from chat.rooms import remove_user_from_room
+
+    with state_lock:
+        username = connected_users.pop(sid, None)
+        old_room = remove_user_from_room(sid)
+    return username, old_room
+
+
+def build_leave_notice(username, room):
+    """Build the ``system`` leave notice sent to a room (BL-15 format)."""
+    return {
+        "type": "leave",
+        "sender": username,
+        "room": room,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "message": f"{username} left the room",
+    }
 
 
 def register(socketio):
@@ -73,7 +130,8 @@ def register(socketio):
             raise ConnectionRefusedError("Username must not exceed 50 characters")
 
         sid = request.sid
-        connected_users[sid] = username
+        with state_lock:
+            connected_users[sid] = username
         logger.info("Client connected: sid=%s user=%s", sid, username)
 
         # Emit server acknowledgment directly to the newly connected client
@@ -83,23 +141,58 @@ def register(socketio):
             "message": "Connected",
         })
 
-    @socketio.on("disconnect")
-    def handle_disconnect():
-        """Handle client disconnection and clean up user state (BL-15 notice on disconnect)."""
-        sid = request.sid
-        username = connected_users.pop(sid, None)
-        logger.info("Client disconnected: sid=%s user=%s", sid, username)
+    # --------------------------------------------------------------------------
+    # BEGINNER CONCEPT: Graceful vs abrupt disconnects (BL-20)
+    # A client can leave politely (Disconnect button) or vanish (tab closed,
+    # Wi-Fi dropped, laptop lid shut). In the abrupt case the TCP socket closes
+    # without warning, or nothing arrives at all; the Socket.IO heartbeat
+    # (ping every HEARTBEAT_INTERVAL s, wait HEARTBEAT_TIMEOUT s for the pong)
+    # notices the silence and fires the same "disconnect" event below.
+    # --------------------------------------------------------------------------
 
-        # Notify room members when a user disconnects (BL-15)
-        from chat.rooms import remove_user_from_room, emit_room_users
-        from datetime import datetime, timezone
-        old_room = remove_user_from_room(sid)
-        if old_room and username:
-            emit("system", {
-                "type": "leave",
-                "sender": username,
-                "room": old_room,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "message": f"{username} left the room",
-            }, to=old_room)
-            emit_room_users(old_room)
+    @socketio.on("disconnect")
+    def handle_disconnect(reason=None):
+        """Clean up a closed session and tell its room (BL-15, BL-20).
+
+        Runs for every kind of disconnect. It must never raise: an exception
+        here would only be logged by Socket.IO, but we also want the room to
+        stay consistent, so cleanup happens first and the notice second.
+        """
+        sid = request.sid
+        try:
+            username, old_room = cleanup_session(sid)
+            logger.info(
+                "Client disconnected: sid=%s user=%s room=%s reason=%s",
+                sid, username, old_room, reason,
+            )
+            # Notify the remaining room members (BL-15). The closed socket is
+            # skipped: it can no longer receive anything.
+            if old_room and username:
+                socketio.emit(
+                    "system",
+                    build_leave_notice(username, old_room),
+                    to=old_room,
+                    skip_sid=sid,
+                )
+                # BL-17: send the updated online-users list to the room
+                from chat.rooms import emit_room_users
+                emit_room_users(old_room)
+        except Exception:  # pragma: no cover - defensive, logged for diagnosis
+            logger.exception("Disconnect cleanup failed: sid=%s", sid)
+
+    @socketio.on_error_default
+    def handle_unexpected_error(exc):
+        """Keep the server up when any event handler raises (BL-20, SAD E500).
+
+        The error is logged with its stack trace and the client that sent the
+        event gets a short, generic ``error`` event instead of silence.
+        """
+        sid = getattr(request, "sid", None)
+        event = (getattr(request, "event", None) or {}).get("message")
+        logger.error(
+            "Unhandled error in event handler: sid=%s event=%s",
+            sid, event, exc_info=exc,
+        )
+        if sid and is_active(sid):
+            code, message = E500_INTERNAL_ERROR
+            emit("error", {"code": code, "message": message, "event": event})
