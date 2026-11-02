@@ -331,3 +331,13 @@ h1 {
   list-style: none;
   border: 1px dashed #c8e1ff;
 }
+
+
+/* BL-19: Typing activity indicator */
+.typing-indicator {
+  min-height: 1.4em;
+  margin-top: 4px;
+  color: #586069;
+  font-size: 0.85rem;
+  font-style: italic;
+}
