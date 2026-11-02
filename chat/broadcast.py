@@ -19,7 +19,6 @@ from chat.validator import (
 def register(socketio):
     """Register message broadcasting handlers."""
 
-
     @socketio.on("typing")
     def handle_typing(data=None):
         """Notify other members of the sender's current room that they are typing (BL-19)."""
@@ -108,5 +107,10 @@ def register(socketio):
             emit("error", exc.to_payload("send_message"))
             return
 
-        emit("user_stopped_typing", {"username": username, "room": room}, to=room, skip_sid=sid)
+        emit(
+            "user_stopped_typing",
+            {"username": username, "room": room},
+            to=room,
+            skip_sid=sid,
+        )
         emit("new_message", message, to=room)
