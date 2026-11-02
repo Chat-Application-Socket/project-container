@@ -134,7 +134,7 @@ The automated test suite passed 82 tests. However, the available pytest output d
 
 
 
-Therefore, individual Test Plan cases have not been marked as passed without supporting evidence. Manual execution and case-by-case verification remain pending.
+Therefore, individual Test Plan cases have not been marked as passed without supporting evidence. The case-by-case matrix records 25 Pass, 2 Fail and 71 Not Run. These counts reflect the evidence recorded so far; they do not mean all 98 cases were executed.
 
 
 
@@ -156,7 +156,10 @@ Therefore, individual Test Plan cases have not been marked as passed without sup
 
 | Test Plan cases | 98 |
 
-| Test Plan cases individually verified | Pending |
+| Test Plan cases marked Pass | 25 |
+| Test Plan cases marked Fail | 2 |
+| Test Plan cases marked Not Run | 71 |
+| Total Test Plan cases | 98 |
 
 
 
@@ -168,11 +171,11 @@ The automated test suite completed successfully with 82 passed tests, 1 skipped 
 
 
 
-Further manual execution and verification are required to complete all 98 test cases listed in the original Test Plan.
+The matrix records 25 Pass, 2 Fail and 71 Not Run out of 98 Test Plan cases. Further execution is required, and the two failed cases must be reviewed.
 
 
 
-**Report status:** Automated testing completed; full Test Plan execution pending.
+**Report status:** Automated testing completed; partial Test Plan execution recorded; 71 cases remain Not Run.
 
 
 ## 8. Manual Verification Evidence
