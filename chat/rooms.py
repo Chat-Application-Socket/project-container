@@ -57,6 +57,14 @@ def remove_user_from_room(sid):
     return old_room
 
 
+def emit_room_users(room):
+    """Broadcast the active usernames in a room to its remaining members."""
+    emit("user_list", {
+        "room": room,
+        "members": get_room_members(room),
+    }, to=room)
+
+
 def register(socketio):
     """Register room event handlers with the SocketIO instance."""
 
@@ -109,6 +117,7 @@ def register(socketio):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "message": f"{username} left the room",
             }, to=old_room)
+            emit_room_users(old_room)
 
         # Join the new room
         socketio_join_room(room)
@@ -116,6 +125,7 @@ def register(socketio):
         if room not in room_members:
             room_members[room] = set()
         room_members[room].add(sid)
+        emit_room_users(room)
 
         # Acknowledge join to sender
         emit("joined", {
@@ -159,3 +169,4 @@ def register(socketio):
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "message": f"{username} left the room",
         }, to=old_room)
+        emit_room_users(old_room)
