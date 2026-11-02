@@ -19,6 +19,33 @@ from chat.validator import (
 def register(socketio):
     """Register message broadcasting handlers."""
 
+
+    @socketio.on("typing")
+    def handle_typing(data=None):
+        """Notify other members of the sender's current room that they are typing (BL-19)."""
+        sid = request.sid
+        username = connected_users.get(sid)
+        if not username:
+            return
+
+        from chat.rooms import get_user_room
+        room = get_user_room(sid)
+        if room:
+            emit("user_typing", {"username": username, "room": room}, to=room, skip_sid=sid)
+
+    @socketio.on("stop_typing")
+    def handle_stop_typing(data=None):
+        """Clear the sender's typing indicator for other members of their room (BL-19)."""
+        sid = request.sid
+        username = connected_users.get(sid)
+        if not username:
+            return
+
+        from chat.rooms import get_user_room
+        room = get_user_room(sid)
+        if room:
+            emit("user_stopped_typing", {"username": username, "room": room}, to=room, skip_sid=sid)
+
     @socketio.on("message")
     @reject_empty_message
     def handle_message(data):
@@ -48,6 +75,7 @@ def register(socketio):
             return
 
         if user_room:
+            emit("user_stopped_typing", {"username": username, "room": user_room}, to=user_room, skip_sid=sid)
             socketio.emit("message", message, to=user_room)
         else:
             socketio.emit("message", message)
@@ -80,4 +108,5 @@ def register(socketio):
             emit("error", exc.to_payload("send_message"))
             return
 
+        emit("user_stopped_typing", {"username": username, "room": room}, to=room, skip_sid=sid)
         emit("new_message", message, to=room)
