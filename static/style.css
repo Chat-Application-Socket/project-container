@@ -331,3 +331,66 @@ h1 {
   list-style: none;
   border: 1px dashed #c8e1ff;
 }
+
+
+/* BL-18: Online users in the current room */
+.online-users {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #e1e4e8;
+  border-radius: 6px;
+  background-color: #fafbfc;
+}
+
+.online-users-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.online-users-heading h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+#online-users-count {
+  min-width: 22px;
+  padding: 2px 7px;
+  border-radius: 12px;
+  background-color: #e1f0ff;
+  color: #0366d6;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.online-users-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.online-user,
+.online-users-empty {
+  padding: 4px 9px;
+  border-radius: 12px;
+  background-color: #eaf7ee;
+  color: #216e39;
+  font-size: 0.85rem;
+}
+
+.online-user-self {
+  font-weight: 700;
+  border: 1px solid #9bd3aa;
+}
+
+.online-users-empty {
+  background: transparent;
+  color: #6a737d;
+  font-style: italic;
+}
