@@ -91,7 +91,7 @@ def register(socketio):
         logger.info("Client disconnected: sid=%s user=%s", sid, username)
 
         # Notify room members when a user disconnects (BL-15)
-        from chat.rooms import remove_user_from_room
+        from chat.rooms import remove_user_from_room, emit_room_users
         from datetime import datetime, timezone
         old_room = remove_user_from_room(sid)
         if old_room and username:
@@ -102,3 +102,4 @@ def register(socketio):
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "message": f"{username} left the room",
             }, to=old_room)
+            emit_room_users(old_room)
