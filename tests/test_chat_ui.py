@@ -101,7 +101,6 @@ def test_client_script_and_pinned_socketio_loaded(page):
     assert "/static/client.js" in page.scripts
 
 
-
 def test_typing_indicator_present_and_accessible(page):
     """BL-19: Typing indicator is available to assistive technology."""
     indicator = page.by_id["typing-indicator"]
