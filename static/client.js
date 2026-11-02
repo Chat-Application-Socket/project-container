@@ -34,6 +34,10 @@ let typingTimeout = null;
 const typingUsers = {};
 let isTyping = false;
 
+// BL-18: Current room presence elements
+const onlineUsersList = document.getElementById("online-users-list");
+const onlineUsersCount = document.getElementById("online-users-count");
+
 // BL-04: Chat area elements
 const emptyState = document.getElementById("empty-state");
 const messageForm = document.getElementById("message-form");
@@ -149,6 +153,7 @@ function setConnectionState(state) {
   if (!isConnected) {
     currentRoom = null;
     if (currentRoomBadge) currentRoomBadge.textContent = "Room: none";
+    renderOnlineUsers([]);
   }
   // The composer is disabled while disconnected; typed text stays in the box
   // so it can be sent after reconnecting (SAD 4.4.3: not queued in v1.0).
@@ -220,6 +225,27 @@ function reconnectNow() {
     setConnectionState("reconnecting");
     socket.connect();
   }
+}
+
+function renderOnlineUsers(members) {
+  if (!onlineUsersList || !onlineUsersCount) return;
+  const users = Array.isArray(members) ? members.filter((name) => typeof name === "string") : [];
+  onlineUsersList.textContent = "";
+  onlineUsersCount.textContent = String(users.length);
+  if (users.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "online-users-empty";
+    empty.textContent = "No room members yet.";
+    onlineUsersList.appendChild(empty);
+    return;
+  }
+  users.forEach((username) => {
+    const item = document.createElement("li");
+    item.className = "online-user";
+    item.textContent = username;
+    if (username === currentUsername) item.classList.add("online-user-self");
+    onlineUsersList.appendChild(item);
+  });
 }
 
 /* ===========================================================================
@@ -542,6 +568,7 @@ function connectToServer(username) {
       if (currentRoomBadge) currentRoomBadge.textContent = `Room: ${data.room}`;
       if (roomInput) roomInput.value = data.room;
       setRoomControlsEnabled(true, true);
+      renderOnlineUsers(data.members);
     }
   });
 
@@ -552,7 +579,14 @@ function connectToServer(username) {
     currentRoom = null;
     desiredRoom = null; // BL-21: user left on purpose; do not rejoin it
     if (currentRoomBadge) currentRoomBadge.textContent = "Room: none";
+    renderOnlineUsers([]);
     setRoomControlsEnabled(true, false);
+  });
+
+  // BL-17/BL-18: Live online-user list for the active room
+  socket.on("user_list", (data) => {
+    if (!data || data.room !== currentRoom || !Array.isArray(data.members)) return;
+    renderOnlineUsers(data.members);
   });
 
   // BL-19: Show typing activity from other members of the current room.
@@ -567,6 +601,7 @@ function connectToServer(username) {
   socket.on("user_stopped_typing", (data) => {
     if (!data || data.room !== currentRoom || typeof data.username !== "string") return;
     clearTypingIndicator(data.username);
+  });
   });
 
   // BL-15: System notification for user join / leave

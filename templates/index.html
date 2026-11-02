@@ -36,6 +36,17 @@
       <span id="current-room-badge" class="room-badge">Room: none</span>
     </section>
 
+    <!-- BL-18: Online users in the current room -->
+    <section class="online-users" aria-live="polite" aria-label="Online users">
+      <div class="online-users-heading">
+        <h2>Online in this room</h2>
+        <span id="online-users-count">0</span>
+      </div>
+      <ul id="online-users-list" class="online-users-list">
+        <li class="online-users-empty">No room members yet.</li>
+      </ul>
+    </section>
+
     <!-- BL-04: Chat area (message list + composer) -->
     <main id="chat-area" class="chat-area">
       <ol id="message-list" class="message-list" aria-live="polite" aria-label="Chat messages">
