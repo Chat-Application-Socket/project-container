@@ -31,6 +31,10 @@ const leaveRoomBtn = document.getElementById("leave-room-btn");
 const currentRoomBadge = document.getElementById("current-room-badge");
 let currentRoom = null;
 
+// BL-18: Current room presence elements
+const onlineUsersList = document.getElementById("online-users-list");
+const onlineUsersCount = document.getElementById("online-users-count");
+
 // BL-04: Chat area elements
 const emptyState = document.getElementById("empty-state");
 const messageForm = document.getElementById("message-form");
@@ -83,6 +87,27 @@ function setRoomControlsEnabled(enabled, inRoom = false) {
 }
 
 // Update connection status label and toggle button label
+function renderOnlineUsers(members) {
+  if (!onlineUsersList || !onlineUsersCount) return;
+  const users = Array.isArray(members) ? members.filter((name) => typeof name === "string") : [];
+  onlineUsersList.textContent = "";
+  onlineUsersCount.textContent = String(users.length);
+  if (users.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "online-users-empty";
+    empty.textContent = "No room members yet.";
+    onlineUsersList.appendChild(empty);
+    return;
+  }
+  users.forEach((username) => {
+    const item = document.createElement("li");
+    item.className = "online-user";
+    item.textContent = username;
+    if (username === currentUsername) item.classList.add("online-user-self");
+    onlineUsersList.appendChild(item);
+  });
+}
+
 function updateStatus(statusText, isConnected) {
   setComposerEnabled(isConnected);
   setRoomControlsEnabled(isConnected, Boolean(currentRoom));
@@ -94,6 +119,7 @@ function updateStatus(statusText, isConnected) {
   } else {
     currentRoom = null;
     if (currentRoomBadge) currentRoomBadge.textContent = "Room: none";
+    renderOnlineUsers([]);
     statusEl.classList.remove("connected");
     if (connectBtn) connectBtn.textContent = "Connect";
   }
@@ -353,6 +379,7 @@ function connectToServer(username) {
       if (currentRoomBadge) currentRoomBadge.textContent = `Room: ${data.room}`;
       if (roomInput) roomInput.value = data.room;
       setRoomControlsEnabled(true, true);
+      renderOnlineUsers(data.members);
     }
   });
 
@@ -360,7 +387,14 @@ function connectToServer(username) {
   socket.on("left", (data) => {
     currentRoom = null;
     if (currentRoomBadge) currentRoomBadge.textContent = "Room: none";
+    renderOnlineUsers([]);
     setRoomControlsEnabled(true, false);
+  });
+
+  // BL-17/BL-18: Live online-user list for the active room
+  socket.on("user_list", (data) => {
+    if (!data || data.room !== currentRoom || !Array.isArray(data.members)) return;
+    renderOnlineUsers(data.members);
   });
 
   // BL-15: System notification for user join / leave
