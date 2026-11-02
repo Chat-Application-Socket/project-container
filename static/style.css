@@ -406,3 +406,12 @@ h1 {
   color: #6a737d;
   font-style: italic;
 }
+
+/* BL-19: Typing activity indicator */
+.typing-indicator {
+  min-height: 1.4em;
+  margin-top: 4px;
+  color: #586069;
+  font-size: 0.85rem;
+  font-style: italic;
+}

@@ -105,3 +105,11 @@ def test_online_users_panel_present(page):
     """BL-18: The page exposes an accessible current-room online users panel."""
     assert page.by_id["online-users-list"]["_tag"] == "ul"
     assert page.by_id["online-users-count"]["_tag"] == "span"
+
+
+def test_typing_indicator_present_and_accessible(page):
+    """BL-19: Typing indicator is available to assistive technology."""
+    indicator = page.by_id["typing-indicator"]
+    assert indicator["_tag"] == "div"
+    assert indicator.get("role") == "status"
+    assert indicator.get("aria-live") == "polite"
