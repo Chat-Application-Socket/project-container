@@ -23,7 +23,7 @@ Check the chat application's browser compatibility, operating-system compatibili
 | Message order test | Two messages appeared in the correct order | Pass |
 | Refresh and reconnect test | Application reconnected and sent a message successfully after refresh | Pass |
 | First-time-user usability test with 3 volunteers | Not yet performed | Not tested |
-| Safari compatibility, if available | Not tested | Not tested |
+| Safari mobile compatibility (iPhone) | Application opened, connected, and sent a test message successfully | Pass |
 | Compatibility on a second operating system (Ubuntu Linux via WSL) | 74 tests passed, 1 skipped | Pass (automated tests) |
 
 ## 4. Issues Found and Fixed
