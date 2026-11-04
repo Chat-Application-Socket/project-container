@@ -27,6 +27,15 @@
       <button id="connect-btn" type="button">Connect</button>
     </section>
 
+    <!-- BL-14 & BL-15: Room controls -->
+    <section class="room-controls">
+      <label for="room-input">Room:</label>
+      <input type="text" id="room-input" placeholder="Room name" maxlength="30" value="global" autocomplete="off">
+      <button id="join-room-btn" type="button" disabled>Join</button>
+      <button id="leave-room-btn" type="button" disabled>Leave</button>
+      <span id="current-room-badge" class="room-badge">Room: none</span>
+    </section>
+
     <!-- BL-04: Chat area (message list + composer) -->
     <main id="chat-area" class="chat-area">
       <ol id="message-list" class="message-list" aria-live="polite" aria-label="Chat messages">
@@ -42,12 +51,16 @@
         <button id="send-btn" class="send-btn" type="submit" disabled>Send</button>
       </form>
       <div id="char-counter" class="char-counter" aria-live="off">0 / 500</div>
+      <div id="typing-indicator" class="typing-indicator" role="status" aria-live="polite"></div>
     </main>
   </div>
 
-  <!-- Pinned official Socket.IO client v4.7.5 loaded at end of body so UI paints immediately -->
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <!-- Instant local load for offline/firewalled networks -->
+  <script src="/static/socket.io.min.js"></script>
+  <!-- Official CDN script with defer so it never blocks page load -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" defer></script>
   <script src="/static/messages.js"></script>
+  <script src="/static/reconnect.js"></script>
   <script src="/static/client.js"></script>
 </body>
 </html>
