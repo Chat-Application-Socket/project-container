@@ -602,7 +602,6 @@ function connectToServer(username) {
     if (!data || data.room !== currentRoom || typeof data.username !== "string") return;
     clearTypingIndicator(data.username);
   });
-  });
 
   // BL-15: System notification for user join / leave
   socket.on("system", (data) => {
@@ -804,7 +803,7 @@ if (leaveRoomBtn) {
 if (usernameInput) {
   usernameInput.value = generateGuestUsername();
   usernameInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && (!socket || !socket.connected)) {
+    if (e.key === "Enter") {
       showError("");
       connectToServer(usernameInput.value);
     }
