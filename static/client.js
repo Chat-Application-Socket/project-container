@@ -66,7 +66,86 @@ const copyUserIdBtn = document.getElementById("copy-user-id-btn");
 const dmIdSearchInput = document.getElementById("dm-id-search-input");
 const dmSearchBtn = document.getElementById("dm-search-btn");
 const dmSearchResult = document.getElementById("dm-search-result");
+const recentChatsPanel = document.getElementById("recent-chats-panel");
+const recentChatsList = document.getElementById("recent-chats-list");
+const recentChats = {};
 let myUserId = null;
+
+const AVATAR_COLORS = [
+  "#2563eb",
+  "#059669",
+  "#d97706",
+  "#7c3aed",
+  "#dc2626",
+  "#0891b2",
+  "#4f46e5",
+];
+
+function getAvatarColor(name) {
+  const str = String(name || "?");
+  let hash = 0;
+  for (let i = 0; i < str.length; i += 1) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  }
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+function recordRecentChat(userId, username) {
+  if (!userId || !username || userId === myUserId) return;
+  recentChats[userId] = { userId, username };
+  renderRecentChats();
+}
+
+function renderRecentChats() {
+  if (!recentChatsPanel || !recentChatsList) return;
+  const entries = Object.values(recentChats);
+  recentChatsList.textContent = "";
+  if (entries.length === 0) {
+    recentChatsPanel.setAttribute("hidden", "true");
+    return;
+  }
+  recentChatsPanel.removeAttribute("hidden");
+  entries.forEach((entry) => {
+    const li = document.createElement("li");
+    li.className = "directory-item";
+
+    const avatar = document.createElement("div");
+    avatar.className = "avatar-circle";
+    avatar.style.backgroundColor = getAvatarColor(entry.username);
+    avatar.textContent = entry.username.charAt(0).toUpperCase();
+    const dot = document.createElement("span");
+    dot.className = "status-dot-online";
+    dot.title = "Active";
+    avatar.appendChild(dot);
+
+    const box = document.createElement("div");
+    box.className = "directory-info";
+    const title = document.createElement("div");
+    title.className = "directory-name";
+    title.textContent = entry.username;
+    const meta = document.createElement("div");
+    meta.className = "directory-meta";
+    meta.textContent = entry.userId;
+    box.appendChild(title);
+    box.appendChild(meta);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-secondary btn-sm";
+    btn.textContent = "Open";
+    btn.addEventListener("click", () => {
+      if (socket && socket.connected) {
+        showError("");
+        socket.emit("start_dm", { user_id: entry.userId });
+      }
+    });
+
+    li.appendChild(avatar);
+    li.appendChild(box);
+    li.appendChild(btn);
+    recentChatsList.appendChild(li);
+  });
+}
 
 // BL-30: Search switcher tabs (Rooms vs Find Person by ID)
 const tabRoomsBtn = document.getElementById("tab-rooms-btn");
@@ -556,21 +635,31 @@ function formatTimestamp(timestamp) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-// Build one message row: sender + timestamp on top, message text below.
+// Build one Slack/Discord-style message row: colored initial avatar on left,
+// sender + timestamp on top, message text below.
 // Every value is written with textContent so HTML in a message is shown as text (NFR-SEC-2).
 function createMessageElement(msg) {
+  const senderName = msg.sender ? String(msg.sender) : "unknown";
   const item = document.createElement("li");
   item.className = "message";
   if (currentUsername && msg.sender === currentUsername) {
     item.classList.add("own");
   }
 
+  const avatar = document.createElement("div");
+  avatar.className = "message-avatar";
+  avatar.style.backgroundColor = getAvatarColor(senderName);
+  avatar.textContent = senderName.charAt(0).toUpperCase();
+
+  const body = document.createElement("div");
+  body.className = "message-body";
+
   const meta = document.createElement("div");
   meta.className = "message-meta";
 
   const sender = document.createElement("span");
   sender.className = "message-sender";
-  sender.textContent = msg.sender ? String(msg.sender) : "unknown";
+  sender.textContent = senderName;
 
   const time = document.createElement("time");
   time.className = "message-time";
@@ -586,8 +675,10 @@ function createMessageElement(msg) {
 
   meta.appendChild(sender);
   meta.appendChild(time);
-  item.appendChild(meta);
-  item.appendChild(content);
+  body.appendChild(meta);
+  body.appendChild(content);
+  item.appendChild(avatar);
+  item.appendChild(body);
   return item;
 }
 
@@ -717,11 +808,24 @@ function clearTypingIndicator(username) {
 function renderTypingIndicator() {
   if (!typingIndicator) return;
   const names = Object.keys(typingUsers);
-  typingIndicator.textContent = names.length === 0
-    ? ""
-    : names.length === 1
-      ? names[0] + " is typing..."
-      : names.join(", ") + " are typing...";
+  typingIndicator.textContent = "";
+  if (names.length === 0) return;
+
+  const dots = document.createElement("span");
+  dots.className = "typing-dots";
+  dots.setAttribute("aria-hidden", "true");
+  for (let i = 0; i < 3; i += 1) {
+    dots.appendChild(document.createElement("span"));
+  }
+
+  const label = document.createElement("span");
+  label.className = "typing-text";
+  label.textContent = names.length === 1
+    ? `${names[0]} is typing`
+    : `${names.join(", ")} are typing`;
+
+  typingIndicator.appendChild(dots);
+  typingIndicator.appendChild(label);
 }
 
 function stopTyping() {
@@ -771,15 +875,9 @@ async function sendMessage() {
   stopTyping();
   if (currentRoomVisibility === "private" && Crypto && currentRoom) {
     if (!roomKeys[currentRoom]) {
-      roomKeys[currentRoom] = {
-        keyHex: Crypto.generateKeyHex(),
-        useFallback: !Crypto.hasSubtle(),
-      };
-      socket.emit("share_room_key", {
-        room: currentRoom,
-        key_hex: roomKeys[currentRoom].keyHex,
-        use_fallback: roomKeys[currentRoom].useFallback,
-      });
+      socket.emit("request_room_key", { use_fallback: !Crypto.hasSubtle() });
+      showError("Syncing encryption key, please retry in a moment.", "warning");
+      return;
     }
     const enc = await Crypto.encryptMessage(
       content,
@@ -882,20 +980,35 @@ function connectToServer(username) {
     if (data && typeof data.room === "string") {
       currentRoom = data.room;
       desiredRoom = data.room; // BL-21: rejoin this room after a reconnect
-      if (currentRoomBadge) currentRoomBadge.textContent = `Room: ${data.room}`;
-      if (roomInput) roomInput.value = data.room;
+
+      let badgeLabel = `Room: ${data.room}`;
+      if (data.is_dm && data.participant_names && typeof data.participant_names === "object") {
+        const peerEntry = Object.entries(data.participant_names).find(([uid]) => uid !== myUserId);
+        if (peerEntry) {
+          badgeLabel = `Direct Chat: ${peerEntry[1]}`;
+          recordRecentChat(peerEntry[0], peerEntry[1]);
+        }
+      }
+      if (currentRoomBadge) currentRoomBadge.textContent = badgeLabel;
+      if (roomInput && !data.is_dm) roomInput.value = data.room;
       updateRoomMetaBadges(data);
       setRoomControlsEnabled(true, true);
       renderOnlineUsers(data.members, data.admin);
       socket.emit("search_rooms", { query: roomSearchInput ? roomSearchInput.value.trim() : "" });
 
-      // BL-29: Ensure private rooms & 1-on-1 DMs have an active E2EE room key
+      // BL-29: Only the room creator / DM initiator generates the key; peers request it
       if (data.visibility === "private" && Crypto) {
-        if ((data.is_admin || data.room.startsWith("dm:")) && !roomKeys[data.room]) {
+        if (data.is_admin && !roomKeys[data.room]) {
           roomKeys[data.room] = {
             keyHex: Crypto.generateKeyHex(),
             useFallback: !Crypto.hasSubtle(),
           };
+          socket.emit("share_room_key", {
+            room: data.room,
+            key_hex: roomKeys[data.room].keyHex,
+            use_fallback: roomKeys[data.room].useFallback,
+          });
+        } else if (data.is_admin && roomKeys[data.room]) {
           socket.emit("share_room_key", {
             room: data.room,
             key_hex: roomKeys[data.room].keyHex,

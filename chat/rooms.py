@@ -111,6 +111,8 @@ def _complete_room_join(sid, username, room, socketio_inst=None):
             "visibility": info["visibility"],
             "admin": info["admin"],
             "is_admin": info["admin_sid"] == sid,
+            "is_dm": bool(info.get("is_dm")),
+            "participant_names": info.get("participant_names", {}),
         }, to=sid)
         return
 
@@ -144,6 +146,8 @@ def _complete_room_join(sid, username, room, socketio_inst=None):
         "visibility": info["visibility"],
         "admin": info["admin"],
         "is_admin": info["admin_sid"] == sid,
+        "is_dm": bool(info.get("is_dm")),
+        "participant_names": info.get("participant_names", {}),
     }, to=sid)
 
     send("system", {
@@ -418,10 +422,11 @@ def register(socketio):
                 room_metadata[dm_room] = {
                     "description": f"Private 1-on-1 chat ({username} & {target_name})",
                     "visibility": "private",
-                    "admin_sid": None,
+                    "admin_sid": sid,
                     "admin": None,
                     "is_dm": True,
                     "participants": pair,
+                    "participant_names": {my_id: username, target_id: target_name},
                 }
 
         _complete_room_join(sid, username, dm_room, socketio_inst=socketio)
