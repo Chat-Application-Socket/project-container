@@ -311,7 +311,7 @@ def register(socketio):
 
         results = []
         with state_lock:
-            all_rooms = set(room_members.keys()) | set(room_metadata.keys())
+            all_rooms = set(room_members.keys()) | set(room_metadata.keys()) | {DEFAULT_ROOM}
             for r in sorted(all_rooms):
                 if r.startswith("dm:"):
                     continue

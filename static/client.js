@@ -158,10 +158,9 @@ let connectionState = "disconnected";
 // failure is "cannot reach the server" (C01) or "connection lost" (C02).
 let hadSession = false;
 
-// Room to (re)join after every successful connect. Updated when the server
-// confirms a join, cleared when the user leaves on purpose (REQ-15: rejoin the
-// previous room after a reconnect).
-let desiredRoom = DEFAULT_ROOM;
+// Room to (re)join after a reconnect. Starts null so users choose or create a room
+// first, and is updated when the server confirms a join (cleared on explicit Leave).
+let desiredRoom = null;
 
 // Back-off scheduler; null only if reconnect.js failed to load.
 const reconnectScheduler = Reconnect ? new Reconnect.ReconnectScheduler({
@@ -839,9 +838,9 @@ function connectToServer(username) {
   // BL-08: A new connection starts with an empty message area
   clearMessages();
 
-  // BL-21: A new session starts fresh: default room, no failed attempts.
+  // BL-21: A new session starts fresh with no auto-joined room.
   hadSession = false;
-  desiredRoom = DEFAULT_ROOM;
+  desiredRoom = null;
   if (reconnectScheduler) reconnectScheduler.reset();
   setConnectionState("connecting");
 
