@@ -29,10 +29,24 @@ const roomInput = document.getElementById("room-input");
 const joinRoomBtn = document.getElementById("join-room-btn");
 const leaveRoomBtn = document.getElementById("leave-room-btn");
 const currentRoomBadge = document.getElementById("current-room-badge");
+const roomAdminBadge = document.getElementById("room-admin-badge");
+const roomVisibilityBadge = document.getElementById("room-visibility-badge");
+const roomDescriptionBadge = document.getElementById("room-description-badge");
 let currentRoom = null;
+let currentRoomAdmin = null;
 let typingTimeout = null;
 const typingUsers = {};
 let isTyping = false;
+
+// BL-26: Create Room modal elements
+const openCreateRoomBtn = document.getElementById("open-create-room-btn");
+const createRoomModal = document.getElementById("create-room-modal");
+const createRoomForm = document.getElementById("create-room-form");
+const closeCreateRoomBtn = document.getElementById("close-create-room-btn");
+const createRoomCancelBtn = document.getElementById("create-room-cancel-btn");
+const newRoomNameInput = document.getElementById("new-room-name");
+const newRoomDescInput = document.getElementById("new-room-description");
+const newRoomVisibilitySelect = document.getElementById("new-room-visibility");
 
 // BL-18: Current room presence elements
 const onlineUsersList = document.getElementById("online-users-list");
@@ -126,11 +140,59 @@ function showError(message, level) {
   }
 }
 
-// BL-14 & BL-15: Room control enabling
+// BL-14 & BL-15 & BL-26: Room control enabling
 function setRoomControlsEnabled(enabled, inRoom = false) {
   if (joinRoomBtn) joinRoomBtn.disabled = !enabled;
   if (leaveRoomBtn) leaveRoomBtn.disabled = !enabled || !inRoom;
   if (roomInput) roomInput.disabled = !enabled;
+  if (openCreateRoomBtn) openCreateRoomBtn.disabled = !enabled;
+}
+
+function updateRoomMetaBadges(data) {
+  if (!data || !data.room) {
+    currentRoomAdmin = null;
+    if (roomAdminBadge) {
+      roomAdminBadge.textContent = "";
+      roomAdminBadge.setAttribute("hidden", "true");
+    }
+    if (roomVisibilityBadge) {
+      roomVisibilityBadge.textContent = "";
+      roomVisibilityBadge.classList.remove("private");
+      roomVisibilityBadge.setAttribute("hidden", "true");
+    }
+    if (roomDescriptionBadge) {
+      roomDescriptionBadge.textContent = "";
+      roomDescriptionBadge.setAttribute("hidden", "true");
+    }
+    return;
+  }
+
+  currentRoomAdmin = typeof data.admin === "string" && data.admin ? data.admin : null;
+  if (roomAdminBadge) {
+    if (currentRoomAdmin) {
+      roomAdminBadge.textContent = `Admin: ${currentRoomAdmin}`;
+      roomAdminBadge.removeAttribute("hidden");
+    } else {
+      roomAdminBadge.textContent = "";
+      roomAdminBadge.setAttribute("hidden", "true");
+    }
+  }
+  if (roomVisibilityBadge) {
+    const vis = data.visibility === "private" ? "private" : "public";
+    roomVisibilityBadge.textContent = vis === "private" ? "Private" : "Public";
+    roomVisibilityBadge.classList.toggle("private", vis === "private");
+    roomVisibilityBadge.removeAttribute("hidden");
+  }
+  if (roomDescriptionBadge) {
+    const desc = typeof data.description === "string" ? data.description.trim() : "";
+    if (desc) {
+      roomDescriptionBadge.textContent = desc;
+      roomDescriptionBadge.removeAttribute("hidden");
+    } else {
+      roomDescriptionBadge.textContent = "";
+      roomDescriptionBadge.setAttribute("hidden", "true");
+    }
+  }
 }
 
 // BL-21: Label of the Connect button for each state.
@@ -153,6 +215,7 @@ function setConnectionState(state) {
   if (!isConnected) {
     currentRoom = null;
     if (currentRoomBadge) currentRoomBadge.textContent = "Room: none";
+    updateRoomMetaBadges(null);
     renderOnlineUsers([]);
   }
   // The composer is disabled while disconnected; typed text stays in the box
@@ -227,8 +290,9 @@ function reconnectNow() {
   }
 }
 
-function renderOnlineUsers(members) {
+function renderOnlineUsers(members, adminName) {
   if (!onlineUsersList || !onlineUsersCount) return;
+  const admin = typeof adminName === "string" ? adminName : currentRoomAdmin;
   const users = Array.isArray(members) ? members.filter((name) => typeof name === "string") : [];
   onlineUsersList.textContent = "";
   onlineUsersCount.textContent = String(users.length);
@@ -242,7 +306,15 @@ function renderOnlineUsers(members) {
   users.forEach((username) => {
     const item = document.createElement("li");
     item.className = "online-user";
-    item.textContent = username;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = username;
+    item.appendChild(nameSpan);
+    if (admin && username === admin) {
+      const pill = document.createElement("span");
+      pill.className = "admin-pill";
+      pill.textContent = "Admin";
+      item.appendChild(pill);
+    }
     if (username === currentUsername) item.classList.add("online-user-self");
     onlineUsersList.appendChild(item);
   });
@@ -558,7 +630,7 @@ function connectToServer(username) {
     }
   });
 
-  // BL-14: Acknowledged room join
+  // BL-14 & BL-26: Acknowledged room join
   socket.on("joined", (data) => {
     stopTyping();
     Object.keys(typingUsers).forEach(clearTypingIndicator);
@@ -567,8 +639,9 @@ function connectToServer(username) {
       desiredRoom = data.room; // BL-21: rejoin this room after a reconnect
       if (currentRoomBadge) currentRoomBadge.textContent = `Room: ${data.room}`;
       if (roomInput) roomInput.value = data.room;
+      updateRoomMetaBadges(data);
       setRoomControlsEnabled(true, true);
-      renderOnlineUsers(data.members);
+      renderOnlineUsers(data.members, data.admin);
     }
   });
 
@@ -579,6 +652,7 @@ function connectToServer(username) {
     currentRoom = null;
     desiredRoom = null; // BL-21: user left on purpose; do not rejoin it
     if (currentRoomBadge) currentRoomBadge.textContent = "Room: none";
+    updateRoomMetaBadges(null);
     renderOnlineUsers([]);
     setRoomControlsEnabled(true, false);
   });
@@ -586,7 +660,7 @@ function connectToServer(username) {
   // BL-17/BL-18: Live online-user list for the active room
   socket.on("user_list", (data) => {
     if (!data || data.room !== currentRoom || !Array.isArray(data.members)) return;
-    renderOnlineUsers(data.members);
+    renderOnlineUsers(data.members, data.admin);
   });
 
   // BL-19: Show typing activity from other members of the current room.
@@ -796,6 +870,57 @@ if (leaveRoomBtn) {
     }
     showError("");
     socket.emit("leave_room", {});
+  });
+}
+
+// BL-26: Create Room modal handlers
+function closeCreateRoomModal() {
+  if (createRoomModal) createRoomModal.setAttribute("hidden", "true");
+}
+
+if (openCreateRoomBtn && createRoomModal) {
+  openCreateRoomBtn.addEventListener("click", () => {
+    if (!socket || !socket.connected) {
+      showError(MSG_NOT_CONNECTED);
+      return;
+    }
+    if (newRoomNameInput) newRoomNameInput.value = "";
+    if (newRoomDescInput) newRoomDescInput.value = "";
+    if (newRoomVisibilitySelect) newRoomVisibilitySelect.value = "public";
+    createRoomModal.removeAttribute("hidden");
+    if (newRoomNameInput) newRoomNameInput.focus();
+  });
+}
+
+if (closeCreateRoomBtn) {
+  closeCreateRoomBtn.addEventListener("click", closeCreateRoomModal);
+}
+if (createRoomCancelBtn) {
+  createRoomCancelBtn.addEventListener("click", closeCreateRoomModal);
+}
+if (createRoomModal) {
+  createRoomModal.addEventListener("click", (e) => {
+    if (e.target === createRoomModal) closeCreateRoomModal();
+  });
+}
+
+if (createRoomForm) {
+  createRoomForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!socket || !socket.connected) {
+      showError(MSG_NOT_CONNECTED);
+      return;
+    }
+    const room = newRoomNameInput ? newRoomNameInput.value.trim() : "";
+    const description = newRoomDescInput ? newRoomDescInput.value.trim() : "";
+    const visibility = newRoomVisibilitySelect ? newRoomVisibilitySelect.value : "public";
+    if (!room) {
+      showError("Room name cannot be empty.");
+      return;
+    }
+    showError("");
+    socket.emit("create_room", { room, description, visibility });
+    closeCreateRoomModal();
   });
 }
 

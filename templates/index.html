@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat Application (Socket Programming)</title>
+  <title>PulseChat — Real-Time WebSocket Chat</title>
   <!-- Inline empty favicon to prevent 404 delays -->
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css">
@@ -11,59 +11,129 @@
   <link rel="preconnect" href="https://cdn.socket.io">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>Chat Application</h1>
-      <div class="status-container">
-        Connection Status: <span id="status">Disconnected</span>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-dot" aria-hidden="true"></span>
+        <div>
+          <h1>PulseChat</h1>
+          <p class="brand-subtitle">Encrypted WebSocket Rooms &amp; Direct Chat</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="status-container">
+          <span class="status-label">Status:</span>
+          <span id="status">Disconnected</span>
+        </div>
       </div>
     </header>
 
     <div id="error-banner" class="error-banner" role="alert" aria-live="polite" hidden></div>
 
-    <section class="controls">
-      <label for="username">Username:</label>
-      <input type="text" id="username" autocomplete="off" maxlength="100">
-      <button id="connect-btn" type="button">Connect</button>
-    </section>
+    <div class="workspace">
+      <aside class="sidebar">
+        <!-- Connection & Identity Card -->
+        <section class="panel controls">
+          <h2 class="panel-title">Your Profile</h2>
+          <div class="field-row">
+            <label for="username">Username</label>
+            <div class="input-group">
+              <input type="text" id="username" autocomplete="off" maxlength="100" placeholder="Enter username">
+              <button id="connect-btn" type="button">Connect</button>
+            </div>
+          </div>
+        </section>
 
-    <!-- BL-14 & BL-15: Room controls -->
-    <section class="room-controls">
-      <label for="room-input">Room:</label>
-      <input type="text" id="room-input" placeholder="Room name" maxlength="30" value="global" autocomplete="off">
-      <button id="join-room-btn" type="button" disabled>Join</button>
-      <button id="leave-room-btn" type="button" disabled>Leave</button>
-      <span id="current-room-badge" class="room-badge">Room: none</span>
-    </section>
+        <!-- BL-14, BL-15, BL-26: Room Controls & Create Room -->
+        <section class="panel room-controls">
+          <div class="panel-header-row">
+            <h2 class="panel-title">Chat Rooms</h2>
+            <button id="open-create-room-btn" class="btn-accent btn-sm" type="button" disabled>+ Create Room</button>
+          </div>
+          <div class="field-row">
+            <label for="room-input">Join by Name</label>
+            <div class="input-group">
+              <input type="text" id="room-input" placeholder="Room name" maxlength="30" value="global" autocomplete="off">
+              <button id="join-room-btn" type="button" disabled>Join</button>
+              <button id="leave-room-btn" class="btn-secondary" type="button" disabled>Leave</button>
+            </div>
+          </div>
+        </section>
 
-    <!-- BL-18: Online users in the current room -->
-    <section class="online-users" aria-live="polite" aria-label="Online users">
-      <div class="online-users-heading">
-        <h2>Online in this room</h2>
-        <span id="online-users-count">0</span>
+        <!-- BL-18: Online users in the current room -->
+        <section class="panel online-users" aria-live="polite" aria-label="Online users">
+          <div class="online-users-heading">
+            <h2>Online in this room</h2>
+            <span id="online-users-count">0</span>
+          </div>
+          <ul id="online-users-list" class="online-users-list">
+            <li class="online-users-empty">No room members yet.</li>
+          </ul>
+        </section>
+      </aside>
+
+      <!-- BL-04: Chat area (message list + composer) -->
+      <main id="chat-area" class="chat-area">
+        <div class="chat-room-header">
+          <div class="chat-room-meta">
+            <span id="current-room-badge" class="room-badge">Room: none</span>
+            <span id="room-admin-badge" class="room-admin-badge" hidden></span>
+            <span id="room-visibility-badge" class="room-visibility-badge" hidden></span>
+          </div>
+          <p id="room-description-badge" class="room-description" hidden></p>
+        </div>
+
+        <ol id="message-list" class="message-list" aria-live="polite" aria-label="Chat messages">
+          <li id="empty-state" class="empty-state">No messages yet. Say hello!</li>
+        </ol>
+
+        <div class="composer-wrap">
+          <div id="typing-indicator" class="typing-indicator" role="status" aria-live="polite"></div>
+          <form id="message-form" class="message-form" autocomplete="off" novalidate>
+            <label for="message-input" class="visually-hidden">Message</label>
+            <textarea id="message-input" class="message-input" rows="1" maxlength="500"
+                      placeholder="Type a message..."
+                      title="Enter to send, Shift+Enter for a new line"
+                      disabled></textarea>
+            <button id="send-btn" class="send-btn" type="submit" disabled>Send</button>
+          </form>
+          <div id="char-counter" class="char-counter" aria-live="off">0 / 500</div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- BL-26: Pop-up Modal to Create a Chat Room -->
+  <div id="create-room-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="create-room-title" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="create-room-title">Create a Chat Room</h2>
+        <button id="close-create-room-btn" class="btn-icon" type="button" aria-label="Close modal">&times;</button>
       </div>
-      <ul id="online-users-list" class="online-users-list">
-        <li class="online-users-empty">No room members yet.</li>
-      </ul>
-    </section>
-
-    <!-- BL-04: Chat area (message list + composer) -->
-    <main id="chat-area" class="chat-area">
-      <ol id="message-list" class="message-list" aria-live="polite" aria-label="Chat messages">
-        <li id="empty-state" class="empty-state">No messages yet. Say hello!</li>
-      </ol>
-
-      <form id="message-form" class="message-form" autocomplete="off" novalidate>
-        <label for="message-input" class="visually-hidden">Message</label>
-        <textarea id="message-input" class="message-input" rows="1" maxlength="500"
-                  placeholder="Type a message..."
-                  title="Enter to send, Shift+Enter for a new line"
-                  disabled></textarea>
-        <button id="send-btn" class="send-btn" type="submit" disabled>Send</button>
+      <form id="create-room-form" autocomplete="off">
+        <div class="modal-body">
+          <div class="field-row">
+            <label for="new-room-name">Room Name</label>
+            <input type="text" id="new-room-name" maxlength="30" required placeholder="e.g. project-alpha">
+          </div>
+          <div class="field-row">
+            <label for="new-room-description">Description / Caption</label>
+            <textarea id="new-room-description" rows="2" maxlength="120" placeholder="What is this room about?"></textarea>
+          </div>
+          <div class="field-row">
+            <label for="new-room-visibility">Room Privacy</label>
+            <select id="new-room-visibility">
+              <option value="public">Public (Visible in search, anyone can join)</option>
+              <option value="private">Private (Admin approval required &amp; encrypted)</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="create-room-cancel-btn" class="btn-secondary" type="button">Cancel</button>
+          <button id="create-room-submit-btn" class="btn-accent" type="submit">Create Room</button>
+        </div>
       </form>
-      <div id="char-counter" class="char-counter" aria-live="off">0 / 500</div>
-      <div id="typing-indicator" class="typing-indicator" role="status" aria-live="polite"></div>
-    </main>
+    </div>
   </div>
 
   <!-- Instant local load for offline/firewalled networks -->
