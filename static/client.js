@@ -32,8 +32,12 @@ const currentRoomBadge = document.getElementById("current-room-badge");
 const roomAdminBadge = document.getElementById("room-admin-badge");
 const roomVisibilityBadge = document.getElementById("room-visibility-badge");
 const roomDescriptionBadge = document.getElementById("room-description-badge");
+const e2eeBadge = document.getElementById("e2ee-badge");
 let currentRoom = null;
 let currentRoomAdmin = null;
+let currentRoomVisibility = "public";
+const Crypto = typeof ChatCrypto === "object" && ChatCrypto ? ChatCrypto : null;
+const roomKeys = {};
 let typingTimeout = null;
 const typingUsers = {};
 let isTyping = false;
@@ -326,6 +330,7 @@ function renderJoinRequests() {
 function updateRoomMetaBadges(data) {
   if (!data || !data.room) {
     currentRoomAdmin = null;
+    currentRoomVisibility = "public";
     if (roomAdminBadge) {
       roomAdminBadge.textContent = "";
       roomAdminBadge.setAttribute("hidden", "true");
@@ -339,10 +344,12 @@ function updateRoomMetaBadges(data) {
       roomDescriptionBadge.textContent = "";
       roomDescriptionBadge.setAttribute("hidden", "true");
     }
+    if (e2eeBadge) e2eeBadge.setAttribute("hidden", "true");
     return;
   }
 
   currentRoomAdmin = typeof data.admin === "string" && data.admin ? data.admin : null;
+  currentRoomVisibility = data.visibility === "private" ? "private" : "public";
   if (roomAdminBadge) {
     if (currentRoomAdmin) {
       roomAdminBadge.textContent = `Admin: ${currentRoomAdmin}`;
@@ -353,10 +360,17 @@ function updateRoomMetaBadges(data) {
     }
   }
   if (roomVisibilityBadge) {
-    const vis = data.visibility === "private" ? "private" : "public";
+    const vis = currentRoomVisibility;
     roomVisibilityBadge.textContent = vis === "private" ? "Private" : "Public";
     roomVisibilityBadge.classList.toggle("private", vis === "private");
     roomVisibilityBadge.removeAttribute("hidden");
+  }
+  if (e2eeBadge) {
+    if (currentRoomVisibility === "private") {
+      e2eeBadge.removeAttribute("hidden");
+    } else {
+      e2eeBadge.setAttribute("hidden", "true");
+    }
   }
   if (roomDescriptionBadge) {
     const desc = typeof data.description === "string" ? data.description.trim() : "";
@@ -620,18 +634,25 @@ function renderMessageAt(msg, index) {
 // Called for every "message" event pushed by the server (no polling, no refresh).
 // The view follows new messages if the user is already at the bottom or the
 // message is their own; if they scrolled up to read older ones, it stays put.
-function handleIncomingMessage(msg) {
+async function handleIncomingMessage(msg) {
   if (!msg || typeof msg !== "object") return;
 
-  const followLatest = isNearBottom() || (currentUsername && msg.sender === currentUsername);
+  let displayMsg = msg;
+  const msgRoom = msg.room || currentRoom;
+  if (msg.encrypted && Crypto && msgRoom && roomKeys[msgRoom]) {
+    const plaintext = await Crypto.decryptMessage(msg, roomKeys[msgRoom].keyHex);
+    displayMsg = Object.assign({}, msg, { content: plaintext });
+  }
+
+  const followLatest = isNearBottom() || (currentUsername && displayMsg.sender === currentUsername);
 
   let item;
   if (messageStore) {
-    const index = messageStore.add(msg);
+    const index = messageStore.add(displayMsg);
     if (index === -1) return; // duplicate or invalid: never shown twice
-    item = renderMessageAt(msg, index);
+    item = renderMessageAt(displayMsg, index);
   } else {
-    item = renderMessage(msg);
+    item = renderMessage(displayMsg);
   }
 
   if (item && followLatest) {
@@ -700,7 +721,7 @@ function sendTyping() {
 
 // Send the text in the input box to the server.
 // The server derives sender, room and timestamp; the client sends only content (SAD ADR-2).
-function sendMessage() {
+async function sendMessage() {
   if (!messageInput) return;
 
   // BL-07: Block empty / whitespace-only input before anything is sent (C04).
@@ -720,7 +741,27 @@ function sendMessage() {
 
   const content = messageInput.value.trim();
   stopTyping();
-  socket.emit("message", { content: content });
+  if (currentRoomVisibility === "private" && Crypto && currentRoom) {
+    if (!roomKeys[currentRoom]) {
+      roomKeys[currentRoom] = {
+        keyHex: Crypto.generateKeyHex(),
+        useFallback: !Crypto.hasSubtle(),
+      };
+      socket.emit("share_room_key", {
+        room: currentRoom,
+        key_hex: roomKeys[currentRoom].keyHex,
+        use_fallback: roomKeys[currentRoom].useFallback,
+      });
+    }
+    const enc = await Crypto.encryptMessage(
+      content,
+      roomKeys[currentRoom].keyHex,
+      roomKeys[currentRoom].useFallback || !Crypto.hasSubtle()
+    );
+    socket.emit("message", Object.assign({ content: "[Encrypted message]" }, enc));
+  } else {
+    socket.emit("message", { content: content });
+  }
   showError("");
 
   messageInput.value = "";
@@ -819,7 +860,46 @@ function connectToServer(username) {
       setRoomControlsEnabled(true, true);
       renderOnlineUsers(data.members, data.admin);
       socket.emit("search_rooms", { query: roomSearchInput ? roomSearchInput.value.trim() : "" });
+
+      // BL-29: Ensure private rooms & 1-on-1 DMs have an active E2EE room key
+      if (data.visibility === "private" && Crypto) {
+        if ((data.is_admin || data.room.startsWith("dm:")) && !roomKeys[data.room]) {
+          roomKeys[data.room] = {
+            keyHex: Crypto.generateKeyHex(),
+            useFallback: !Crypto.hasSubtle(),
+          };
+          socket.emit("share_room_key", {
+            room: data.room,
+            key_hex: roomKeys[data.room].keyHex,
+            use_fallback: roomKeys[data.room].useFallback,
+          });
+        } else if (!roomKeys[data.room]) {
+          socket.emit("request_room_key", { use_fallback: !Crypto.hasSubtle() });
+        }
+      }
     }
+  });
+
+  // BL-29: Receive or share room encryption keys for private rooms & 1-on-1 DMs
+  socket.on("room_key_shared", (data) => {
+    if (!data || !data.room || !data.key_hex) return;
+    const prev = roomKeys[data.room];
+    roomKeys[data.room] = {
+      keyHex: data.key_hex,
+      useFallback: Boolean(data.use_fallback) || (prev ? prev.useFallback : false),
+    };
+  });
+
+  socket.on("room_key_requested", (data) => {
+    if (!data || !data.room || !roomKeys[data.room]) return;
+    if (data.use_fallback) {
+      roomKeys[data.room].useFallback = true;
+    }
+    socket.emit("share_room_key", {
+      room: data.room,
+      key_hex: roomKeys[data.room].keyHex,
+      use_fallback: roomKeys[data.room].useFallback,
+    });
   });
 
   // BL-15: Acknowledged room leave

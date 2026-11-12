@@ -430,3 +430,36 @@ def register(socketio):
             "from_user_id": my_id,
             "from_username": username,
         }, to=target_sid)
+
+    @socketio.on("share_room_key")
+    def handle_share_room_key(data):
+        """Relay client-generated room encryption key to authorized room members (BL-29)."""
+        sid = request.sid
+        if sid not in connected_users or not isinstance(data, dict):
+            return
+        room = user_rooms.get(sid)
+        if not room or data.get("room") != room:
+            return
+        key_hex = data.get("key_hex")
+        if not isinstance(key_hex, str) or not key_hex:
+            return
+        emit("room_key_shared", {
+            "room": room,
+            "key_hex": key_hex,
+            "use_fallback": bool(data.get("use_fallback")),
+        }, to=room, skip_sid=sid)
+
+    @socketio.on("request_room_key")
+    def handle_request_room_key(data=None):
+        """Ask existing members of a private room / DM for the room encryption key (BL-29)."""
+        sid = request.sid
+        if sid not in connected_users:
+            return
+        room = user_rooms.get(sid)
+        if not room:
+            return
+        emit("room_key_requested", {
+            "room": room,
+            "requester_sid": sid,
+            "use_fallback": bool(isinstance(data, dict) and data.get("use_fallback")),
+        }, to=room, skip_sid=sid)

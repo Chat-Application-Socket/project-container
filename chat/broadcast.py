@@ -67,6 +67,16 @@ def register(socketio):
             "type": "message",
         }
 
+        if data.get("encrypted") is True and isinstance(data.get("ciphertext"), str):
+            message["encrypted"] = True
+            message["ciphertext"] = data["ciphertext"]
+            message["iv"] = data.get("iv", "") if isinstance(data.get("iv"), str) else ""
+            message["enc_mode"] = (
+                data.get("enc_mode", "aes-gcm")
+                if isinstance(data.get("enc_mode"), str) else "aes-gcm"
+            )
+            message["content"] = "[Encrypted message]"
+
         try:
             validate_message_object(message)
         except MessageValidationError as exc:
