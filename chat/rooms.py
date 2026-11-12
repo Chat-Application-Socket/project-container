@@ -17,10 +17,12 @@ ROOM_NAME_REGEX = re.compile(r"^[A-Za-z0-9_ -]{1,30}$")
 # In-memory mapping of active rooms:
 # user_rooms: { sid: room_name }
 # room_members: { room_name: set(sid) }
-# room_metadata: { room_name: {description, visibility, admin_sid, admin_username} }
+# room_metadata: { room_name: {description, visibility, admin_sid, admin} }
+# pending_requests: { room_name: { requester_sid: requester_username } }
 user_rooms = {}
 room_members = {}
 room_metadata = {}
+pending_requests = {}
 
 
 def is_valid_room_name(room):
@@ -69,31 +71,39 @@ def remove_user_from_room(sid):
     Returns the previous room name, or None.
     """
     with state_lock:
+        for req_map in pending_requests.values():
+            req_map.pop(sid, None)
         old_room = user_rooms.pop(sid, None)
         if old_room and old_room in room_members:
             room_members[old_room].discard(sid)
             if not room_members[old_room]:
                 room_members.pop(old_room, None)
                 room_metadata.pop(old_room, None)
+                pending_requests.pop(old_room, None)
     return old_room
 
 
-def emit_room_users(room):
+def emit_room_users(room, socketio_inst=None):
     """Broadcast the active usernames in a room to its remaining members."""
     info = get_room_info(room)
-    emit("user_list", {
+    payload = {
         "room": room,
         "members": get_room_members(room),
         "admin": info["admin"],
-    }, to=room)
+    }
+    if socketio_inst is not None:
+        socketio_inst.emit("user_list", payload, to=room)
+    else:
+        emit("user_list", payload, to=room)
 
 
-def _complete_room_join(sid, username, room):
+def _complete_room_join(sid, username, room, socketio_inst=None):
     """Move a connected user from any previous room into ``room`` and notify."""
+    send = socketio_inst.emit if socketio_inst is not None else emit
     old_room = user_rooms.get(sid)
     if old_room == room:
         info = get_room_info(room)
-        emit("joined", {
+        send("joined", {
             "room": room,
             "username": username,
             "members": get_room_members(room),
@@ -101,32 +111,32 @@ def _complete_room_join(sid, username, room):
             "visibility": info["visibility"],
             "admin": info["admin"],
             "is_admin": info["admin_sid"] == sid,
-        })
+        }, to=sid)
         return
 
     if old_room:
-        socketio_leave_room(old_room)
+        socketio_leave_room(old_room, sid=sid)
         remove_user_from_room(sid)
-        emit("system", {
+        send("system", {
             "type": "leave",
             "sender": username,
             "room": old_room,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "message": f"{username} left the room",
         }, to=old_room)
-        emit_room_users(old_room)
+        emit_room_users(old_room, socketio_inst=socketio_inst)
 
     with state_lock:
         if sid not in connected_users:
             return
-        socketio_join_room(room)
+        socketio_join_room(room, sid=sid)
         user_rooms[sid] = room
         room_members.setdefault(room, set()).add(sid)
 
     info = get_room_info(room)
-    emit_room_users(room)
+    emit_room_users(room, socketio_inst=socketio_inst)
 
-    emit("joined", {
+    send("joined", {
         "room": room,
         "username": username,
         "members": get_room_members(room),
@@ -134,9 +144,9 @@ def _complete_room_join(sid, username, room):
         "visibility": info["visibility"],
         "admin": info["admin"],
         "is_admin": info["admin_sid"] == sid,
-    })
+    }, to=sid)
 
-    emit("system", {
+    send("system", {
         "type": "join",
         "sender": username,
         "room": room,
@@ -192,7 +202,7 @@ def register(socketio):
                 "admin": username,
             }
 
-        _complete_room_join(sid, username, room)
+        _complete_room_join(sid, username, room, socketio_inst=socketio)
 
     @socketio.on("join_room")
     def handle_join_room(data):
@@ -221,7 +231,95 @@ def register(socketio):
                 return
             room = raw_room.strip()
 
-        _complete_room_join(sid, username, room)
+        # BL-27: Private room join requests require admin approval
+        info = get_room_info(room)
+        if info["visibility"] == "private" and info["admin_sid"] != sid:
+            with state_lock:
+                already_member = sid in room_members.get(room, set())
+                if not already_member:
+                    pending_requests.setdefault(room, {})[sid] = username
+            if not already_member:
+                emit("join_request_pending", {
+                    "room": room,
+                    "admin": info["admin"],
+                    "message": f"Join request sent to {info['admin']} for '{room}'.",
+                })
+                if info["admin_sid"] and info["admin_sid"] in connected_users:
+                    socketio.emit("join_request", {
+                        "room": room,
+                        "requester_sid": sid,
+                        "requester": username,
+                    }, to=info["admin_sid"])
+                return
+
+        _complete_room_join(sid, username, room, socketio_inst=socketio)
+
+    @socketio.on("respond_join_request")
+    def handle_respond_join_request(data):
+        """Admin approves or rejects a pending join request for a private room (BL-27)."""
+        sid = request.sid
+        if sid not in connected_users or not isinstance(data, dict):
+            return
+
+        room = data.get("room")
+        req_sid = data.get("requester_sid")
+        allow = bool(data.get("allow"))
+        if not isinstance(room, str) or not isinstance(req_sid, str):
+            return
+
+        info = get_room_info(room)
+        if info["admin_sid"] != sid:
+            emit("error", {
+                "code": "E403",
+                "message": "Only the room admin can approve or deny requests.",
+                "event": "respond_join_request",
+            })
+            return
+
+        with state_lock:
+            req_username = pending_requests.get(room, {}).pop(req_sid, None)
+            still_connected = req_sid in connected_users
+
+        if not req_username or not still_connected:
+            return
+
+        if allow:
+            _complete_room_join(req_sid, req_username, room, socketio_inst=socketio)
+        else:
+            socketio.emit("join_request_rejected", {
+                "room": room,
+                "message": f"Your request to join '{room}' was declined by the admin.",
+            }, to=req_sid)
+
+    @socketio.on("search_rooms")
+    def handle_search_rooms(data=None):
+        """Return active public rooms matching an optional search query (BL-27)."""
+        sid = request.sid
+        if sid not in connected_users:
+            return
+
+        query = ""
+        if isinstance(data, dict) and isinstance(data.get("query"), str):
+            query = data["query"].strip().lower()
+
+        results = []
+        with state_lock:
+            all_rooms = set(room_members.keys()) | set(room_metadata.keys())
+            for r in sorted(all_rooms):
+                meta = room_metadata.get(r, {})
+                if meta.get("visibility") == "private":
+                    continue
+                desc = meta.get("description", "")
+                if query and query not in r.lower() and query not in desc.lower():
+                    continue
+                results.append({
+                    "room": r,
+                    "description": desc,
+                    "admin": meta.get("admin"),
+                    "member_count": len(room_members.get(r, set())),
+                })
+
+        emit("room_list", {"rooms": results, "query": query})
 
     @socketio.on("leave_room")
     def handle_leave_room(data=None):

@@ -48,6 +48,14 @@ const newRoomNameInput = document.getElementById("new-room-name");
 const newRoomDescInput = document.getElementById("new-room-description");
 const newRoomVisibilitySelect = document.getElementById("new-room-visibility");
 
+// BL-27: Room discovery & Admin join request elements
+const roomSearchInput = document.getElementById("room-search-input");
+const roomSearchBtn = document.getElementById("room-search-btn");
+const roomSearchResults = document.getElementById("room-search-results");
+const joinRequestsPanel = document.getElementById("join-requests-panel");
+const joinRequestsList = document.getElementById("join-requests-list");
+const pendingJoinRequests = [];
+
 // BL-18: Current room presence elements
 const onlineUsersList = document.getElementById("online-users-list");
 const onlineUsersCount = document.getElementById("online-users-count");
@@ -140,12 +148,125 @@ function showError(message, level) {
   }
 }
 
-// BL-14 & BL-15 & BL-26: Room control enabling
+// BL-14 & BL-15 & BL-26 & BL-27: Room control enabling
 function setRoomControlsEnabled(enabled, inRoom = false) {
   if (joinRoomBtn) joinRoomBtn.disabled = !enabled;
   if (leaveRoomBtn) leaveRoomBtn.disabled = !enabled || !inRoom;
   if (roomInput) roomInput.disabled = !enabled;
   if (openCreateRoomBtn) openCreateRoomBtn.disabled = !enabled;
+  if (roomSearchInput) roomSearchInput.disabled = !enabled;
+  if (roomSearchBtn) roomSearchBtn.disabled = !enabled;
+}
+
+function renderRoomSearchResults(rooms) {
+  if (!roomSearchResults) return;
+  roomSearchResults.textContent = "";
+  const list = Array.isArray(rooms) ? rooms : [];
+  if (list.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "directory-meta";
+    empty.textContent = "No matching public rooms.";
+    roomSearchResults.appendChild(empty);
+    return;
+  }
+  list.forEach((info) => {
+    const li = document.createElement("li");
+    li.className = "directory-item";
+
+    const box = document.createElement("div");
+    box.className = "directory-info";
+    const title = document.createElement("div");
+    title.className = "directory-name";
+    title.textContent = `${info.room} (${info.member_count || 0})`;
+    const meta = document.createElement("div");
+    meta.className = "directory-meta";
+    const adminText = info.admin ? `Admin: ${info.admin}` : "Public";
+    meta.textContent = info.description ? `${info.description} — ${adminText}` : adminText;
+    box.appendChild(title);
+    box.appendChild(meta);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-sm";
+    btn.textContent = info.room === currentRoom ? "Joined" : "Join";
+    btn.disabled = info.room === currentRoom;
+    btn.addEventListener("click", () => {
+      if (socket && socket.connected) {
+        showError("");
+        socket.emit("join_room", { room: info.room });
+      }
+    });
+
+    li.appendChild(box);
+    li.appendChild(btn);
+    roomSearchResults.appendChild(li);
+  });
+}
+
+function renderJoinRequests() {
+  if (!joinRequestsPanel || !joinRequestsList) return;
+  joinRequestsList.textContent = "";
+  if (pendingJoinRequests.length === 0) {
+    joinRequestsPanel.setAttribute("hidden", "true");
+    return;
+  }
+  joinRequestsPanel.removeAttribute("hidden");
+  pendingJoinRequests.forEach((req, index) => {
+    const li = document.createElement("li");
+    li.className = "directory-item";
+
+    const box = document.createElement("div");
+    box.className = "directory-info";
+    const title = document.createElement("div");
+    title.className = "directory-name";
+    title.textContent = req.requester;
+    const meta = document.createElement("div");
+    meta.className = "directory-meta";
+    meta.textContent = `Wants to join ${req.room}`;
+    box.appendChild(title);
+    box.appendChild(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "input-group";
+
+    const allowBtn = document.createElement("button");
+    allowBtn.type = "button";
+    allowBtn.className = "btn-success btn-sm";
+    allowBtn.textContent = "Allow";
+    allowBtn.addEventListener("click", () => {
+      if (socket && socket.connected) {
+        socket.emit("respond_join_request", {
+          room: req.room,
+          requester_sid: req.requester_sid,
+          allow: true,
+        });
+      }
+      pendingJoinRequests.splice(index, 1);
+      renderJoinRequests();
+    });
+
+    const denyBtn = document.createElement("button");
+    denyBtn.type = "button";
+    denyBtn.className = "btn-danger btn-sm";
+    denyBtn.textContent = "Deny";
+    denyBtn.addEventListener("click", () => {
+      if (socket && socket.connected) {
+        socket.emit("respond_join_request", {
+          room: req.room,
+          requester_sid: req.requester_sid,
+          allow: false,
+        });
+      }
+      pendingJoinRequests.splice(index, 1);
+      renderJoinRequests();
+    });
+
+    actions.appendChild(allowBtn);
+    actions.appendChild(denyBtn);
+    li.appendChild(box);
+    li.appendChild(actions);
+    joinRequestsList.appendChild(li);
+  });
 }
 
 function updateRoomMetaBadges(data) {
@@ -625,6 +746,7 @@ function connectToServer(username) {
     if (desiredRoom) {
       socket.emit("join_room", { room: desiredRoom });
     }
+    socket.emit("search_rooms", { query: roomSearchInput ? roomSearchInput.value.trim() : "" });
     if (isReconnect) {
       renderSystemNotice(RECONNECT_MESSAGES.RECONNECTED, new Date().toISOString());
     }
@@ -642,6 +764,7 @@ function connectToServer(username) {
       updateRoomMetaBadges(data);
       setRoomControlsEnabled(true, true);
       renderOnlineUsers(data.members, data.admin);
+      socket.emit("search_rooms", { query: roomSearchInput ? roomSearchInput.value.trim() : "" });
     }
   });
 
@@ -655,6 +778,36 @@ function connectToServer(username) {
     updateRoomMetaBadges(null);
     renderOnlineUsers([]);
     setRoomControlsEnabled(true, false);
+    socket.emit("search_rooms", { query: roomSearchInput ? roomSearchInput.value.trim() : "" });
+  });
+
+  // BL-27: Public room search results & Private room join requests
+  socket.on("room_list", (data) => {
+    renderRoomSearchResults(data && data.rooms ? data.rooms : []);
+  });
+
+  socket.on("join_request", (data) => {
+    if (!data || !data.room || !data.requester_sid || !data.requester) return;
+    const exists = pendingJoinRequests.some(
+      (r) => r.room === data.room && r.requester_sid === data.requester_sid
+    );
+    if (!exists) {
+      pendingJoinRequests.push(data);
+      renderJoinRequests();
+      renderSystemNotice(`${data.requester} requested to join ${data.room}.`, new Date().toISOString());
+    }
+  });
+
+  socket.on("join_request_pending", (data) => {
+    if (data && data.message) {
+      showError(data.message, "warning");
+    }
+  });
+
+  socket.on("join_request_rejected", (data) => {
+    if (data && data.message) {
+      showError(data.message);
+    }
   });
 
   // BL-17/BL-18: Live online-user list for the active room
@@ -922,6 +1075,20 @@ if (createRoomForm) {
     socket.emit("create_room", { room, description, visibility });
     closeCreateRoomModal();
   });
+}
+
+// BL-27: Public room search handlers
+function triggerRoomSearch() {
+  if (!socket || !socket.connected) return;
+  const query = roomSearchInput ? roomSearchInput.value.trim() : "";
+  socket.emit("search_rooms", { query });
+}
+
+if (roomSearchBtn) {
+  roomSearchBtn.addEventListener("click", triggerRoomSearch);
+}
+if (roomSearchInput) {
+  roomSearchInput.addEventListener("input", triggerRoomSearch);
 }
 
 // Pre-fill username and initiate connection on initial page load

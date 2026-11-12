@@ -44,7 +44,7 @@
           </div>
         </section>
 
-        <!-- BL-14, BL-15, BL-26: Room Controls & Create Room -->
+        <!-- BL-14, BL-15, BL-26, BL-27: Room Controls, Create & Public Discovery -->
         <section class="panel room-controls">
           <div class="panel-header-row">
             <h2 class="panel-title">Chat Rooms</h2>
@@ -58,6 +58,20 @@
               <button id="leave-room-btn" class="btn-secondary" type="button" disabled>Leave</button>
             </div>
           </div>
+          <div class="field-row">
+            <label for="room-search-input">Search Public Rooms</label>
+            <div class="input-group">
+              <input type="text" id="room-search-input" placeholder="Filter public rooms..." autocomplete="off" disabled>
+              <button id="room-search-btn" class="btn-secondary btn-sm" type="button" disabled>Search</button>
+            </div>
+            <ul id="room-search-results" class="directory-list"></ul>
+          </div>
+        </section>
+
+        <!-- BL-27: Admin Join Requests Panel -->
+        <section id="join-requests-panel" class="panel join-requests" hidden>
+          <h2 class="panel-title">Pending Join Requests</h2>
+          <ul id="join-requests-list" class="directory-list"></ul>
         </section>
 
         <!-- BL-18: Online users in the current room -->
