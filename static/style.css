@@ -517,21 +517,33 @@ button:disabled {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  width: 100%;
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: transparent;
-  border: none;
+  max-width: 78%;
+  align-self: flex-start;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border-light);
   word-wrap: break-word;
   transition: background-color 0.12s ease;
 }
 
 .message:hover {
-  background: #f9fafb;
+  background: #f3f4f6;
 }
 
 .message.own {
-  background: #f8fafc;
+  align-self: flex-end;
+  flex-direction: row-reverse;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.message.own .message-meta {
+  justify-content: flex-end;
+}
+
+.message.own .message-content {
+  text-align: right;
 }
 
 .message-avatar,

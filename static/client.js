@@ -34,6 +34,7 @@ const roomVisibilityBadge = document.getElementById("room-visibility-badge");
 const roomDescriptionBadge = document.getElementById("room-description-badge");
 const e2eeBadge = document.getElementById("e2ee-badge");
 let currentRoom = null;
+let lastActiveRoom = null;
 let currentRoomAdmin = null;
 let currentRoomVisibility = "public";
 const Crypto = typeof ChatCrypto === "object" && ChatCrypto ? ChatCrypto : null;
@@ -934,6 +935,7 @@ function connectToServer(username) {
   }
 
   // BL-08: A new connection starts with an empty message area
+  lastActiveRoom = null;
   clearMessages();
 
   // BL-21: A new session starts fresh with no auto-joined room.
@@ -978,6 +980,10 @@ function connectToServer(username) {
     stopTyping();
     Object.keys(typingUsers).forEach(clearTypingIndicator);
     if (data && typeof data.room === "string") {
+      if (lastActiveRoom && lastActiveRoom !== data.room) {
+        clearMessages();
+      }
+      lastActiveRoom = data.room;
       currentRoom = data.room;
       desiredRoom = data.room; // BL-21: rejoin this room after a reconnect
 
