@@ -1030,7 +1030,7 @@ function connectToServer(username) {
     if (data && typeof data.user_id === "string") {
       myUserId = data.user_id;
       if (myUserIdEl) myUserIdEl.textContent = myUserId;
-      if (copyUserIdBtn) copyUserIdBtn.disabled = false;
+      if (!copyUserIdBtn) copyUserIdBtn.disabled = false;
     }
   });
 
@@ -1292,14 +1292,40 @@ if (roomSearchInput) {
 }
 
 // BL-28: Copy Unique ID & Search User for 1-on-1 DM
+function fallbackCopyText(text) {
+  const helper = document.createElement("textarea");
+  helper.value = text;
+  helper.setAttribute("readonly", "");
+  helper.style.position = "fixed";
+  helper.style.left = "-9999px";
+  document.body.appendChild(helper);
+  helper.select();
+  helper.setSelectionRange(0, text.length);
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch (err) {
+    ok = false;
+  }
+  document.body.removeChild(helper);
+  return ok;
+}
+
+function showCopiedFeedback() {
+  if (!copyUserIdBtn) return;
+  copyUserIdBtn.textContent = "Copied!";
+  setTimeout(() => { copyUserIdBtn.textContent = "Copy"; }, 1500);
+}
+
 if (copyUserIdBtn) {
   copyUserIdBtn.addEventListener("click", () => {
     if (!myUserId) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(myUserId).then(() => {
-        copyUserIdBtn.textContent = "Copied!";
-        setTimeout(() => { copyUserIdBtn.textContent = "Copy"; }, 1500);
-      }).catch(() => {});
+    if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+      navigator.clipboard.writeText(myUserId).then(showCopiedFeedback).catch(() => {
+        if (fallbackCopyText(myUserId)) showCopiedFeedback();
+      });
+    } else if (fallbackCopyText(myUserId)) {
+      showCopiedFeedback();
     }
   });
 }

@@ -57,10 +57,14 @@ def test_lookup_and_start_dm_isolates_two_users(app):
         assert dm_room.startswith("dm:")
         assert joined["visibility"] == "private"
 
-        # Bob receives dm_invite
-        invites = [e for e in bob.get_received() if e["name"] == "dm_invite"]
+        # Bob receives dm_invite and automatically joins the private 1-on-1 DM room
+        bob_events = bob.get_received()
+        invites = [e for e in bob_events if e["name"] == "dm_invite"]
         assert len(invites) == 1
         assert _payload(invites[0])["from_username"] == "Alice"
+        bob_joined = [e for e in bob_events if e["name"] == "joined"]
+        assert len(bob_joined) == 1
+        assert _payload(bob_joined[0])["room"] == dm_room
 
         # Eve cannot join the DM room directly or find it in search_rooms
         eve.emit("join_room", {"room": dm_room})

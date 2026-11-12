@@ -425,6 +425,7 @@ def register(socketio):
                 }
 
         _complete_room_join(sid, username, dm_room, socketio_inst=socketio)
+        _complete_room_join(target_sid, target_name, dm_room, socketio_inst=socketio)
         socketio.emit("dm_invite", {
             "room": dm_room,
             "from_user_id": my_id,
