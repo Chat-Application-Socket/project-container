@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PulseChat — Real-Time WebSocket Chat</title>
+  <title>Chat Application (WebSocket)</title>
   <!-- Inline empty favicon to prevent 404 delays -->
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css">
@@ -14,10 +14,9 @@
   <div class="app-shell">
     <header class="app-header">
       <div class="brand">
-        <span class="brand-dot" aria-hidden="true"></span>
         <div>
-          <h1>PulseChat</h1>
-          <p class="brand-subtitle">Encrypted WebSocket Rooms &amp; Direct Chat</p>
+          <h1>Chat Application</h1>
+          <p class="brand-subtitle">Real-time WebSocket Rooms &amp; Private Direct Messaging</p>
         </div>
       </div>
       <div class="header-right">
@@ -51,40 +50,58 @@
           </div>
         </section>
 
-        <!-- BL-28: 1-on-1 Direct Message by Unique ID -->
-        <section class="panel dm-panel">
-          <h2 class="panel-title">Direct Message (1-on-1)</h2>
-          <div class="field-row">
-            <label for="dm-id-search-input">Search by User ID</label>
-            <div class="input-group">
-              <input type="text" id="dm-id-search-input" placeholder="e.g. USR-A1B2C3" autocomplete="off" disabled>
-              <button id="dm-search-btn" class="btn-secondary btn-sm" type="button" disabled>Find</button>
-            </div>
-            <ul id="dm-search-result" class="directory-list"></ul>
+        <!-- Search Switcher Tabs: Rooms vs Individual Person -->
+        <section class="panel search-tabs-panel">
+          <div class="tab-bar" role="tablist" aria-label="Search mode">
+            <button id="tab-rooms-btn" class="tab-btn active" type="button" role="tab" aria-selected="true">
+              Search Rooms
+            </button>
+            <button id="tab-dm-btn" class="tab-btn" type="button" role="tab" aria-selected="false">
+              Find Person (ID)
+            </button>
           </div>
-        </section>
 
-        <!-- BL-14, BL-15, BL-26, BL-27: Room Controls, Create & Public Discovery -->
-        <section class="panel room-controls">
-          <div class="panel-header-row">
-            <h2 class="panel-title">Chat Rooms</h2>
-            <button id="open-create-room-btn" class="btn-accent btn-sm" type="button" disabled>+ Create Room</button>
-          </div>
-          <div class="field-row">
-            <label for="room-input">Join by Name</label>
-            <div class="input-group">
-              <input type="text" id="room-input" placeholder="Room name" maxlength="30" value="global" autocomplete="off">
-              <button id="join-room-btn" type="button" disabled>Join</button>
-              <button id="leave-room-btn" class="btn-secondary" type="button" disabled>Leave</button>
+          <!-- Tab 1: Public Room Discovery & Room Controls -->
+          <div id="tab-rooms-panel" class="tab-content">
+            <div class="panel-header-row">
+              <h2 class="panel-title">Public Rooms</h2>
+              <button id="open-create-room-btn" class="btn-primary btn-sm" type="button" disabled>+ Create Room</button>
+            </div>
+            <div class="field-row">
+              <label for="room-search-input">Search Public Rooms</label>
+              <div class="input-group">
+                <input type="text" id="room-search-input" placeholder="Search rooms..." autocomplete="off" disabled>
+                <button id="room-search-btn" class="btn-secondary btn-sm" type="button" disabled>Search</button>
+              </div>
+              <ul id="room-search-results" class="directory-list"></ul>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="field-row">
+              <label for="room-input">Join / Leave by Name</label>
+              <div class="input-group">
+                <input type="text" id="room-input" placeholder="Room name" maxlength="30" value="global" autocomplete="off">
+                <button id="join-room-btn" type="button" disabled>Join</button>
+                <button id="leave-room-btn" class="btn-secondary" type="button" disabled>Leave</button>
+              </div>
             </div>
           </div>
-          <div class="field-row">
-            <label for="room-search-input">Search Public Rooms</label>
-            <div class="input-group">
-              <input type="text" id="room-search-input" placeholder="Filter public rooms..." autocomplete="off" disabled>
-              <button id="room-search-btn" class="btn-secondary btn-sm" type="button" disabled>Search</button>
+
+          <!-- Tab 2: Individual Person Search by Unique ID -->
+          <div id="tab-dm-panel" class="tab-content" hidden>
+            <div class="panel-header-row">
+              <h2 class="panel-title">Direct Message (1-on-1)</h2>
             </div>
-            <ul id="room-search-results" class="directory-list"></ul>
+            <div class="field-row">
+              <label for="dm-id-search-input">Search Person by Unique ID</label>
+              <div class="input-group">
+                <input type="text" id="dm-id-search-input" placeholder="e.g. USR-A1B2C3" autocomplete="off" disabled>
+                <button id="dm-search-btn" class="btn-primary btn-sm" type="button" disabled>Find</button>
+              </div>
+              <p class="helper-text">Ask your friend for their Unique ID shown under Your Profile.</p>
+              <ul id="dm-search-result" class="directory-list"></ul>
+            </div>
           </div>
         </section>
 
@@ -106,7 +123,7 @@
         </section>
       </aside>
 
-      <!-- BL-04: Chat area (message list + composer) -->
+      <!-- BL-04: Chat area (message dashboard + composer) -->
       <main id="chat-area" class="chat-area">
         <div class="chat-room-header">
           <div class="chat-room-meta">
@@ -118,12 +135,14 @@
           <p id="room-description-badge" class="room-description" hidden></p>
         </div>
 
-        <ol id="message-list" class="message-list" aria-live="polite" aria-label="Chat messages">
-          <li id="empty-state" class="empty-state">No messages yet. Say hello!</li>
-        </ol>
+        <div class="chat-feed-wrap">
+          <ol id="message-list" class="message-list" aria-live="polite" aria-label="Chat messages">
+            <li id="empty-state" class="empty-state">No messages yet. Say hello!</li>
+          </ol>
+          <div id="typing-indicator" class="typing-indicator" role="status" aria-live="polite"></div>
+        </div>
 
         <div class="composer-wrap">
-          <div id="typing-indicator" class="typing-indicator" role="status" aria-live="polite"></div>
           <form id="message-form" class="message-form" autocomplete="off" novalidate>
             <label for="message-input" class="visually-hidden">Message</label>
             <textarea id="message-input" class="message-input" rows="1" maxlength="500"
@@ -165,7 +184,7 @@
         </div>
         <div class="modal-footer">
           <button id="create-room-cancel-btn" class="btn-secondary" type="button">Cancel</button>
-          <button id="create-room-submit-btn" class="btn-accent" type="submit">Create Room</button>
+          <button id="create-room-submit-btn" class="btn-primary" type="submit">Create Room</button>
         </div>
       </form>
     </div>

@@ -68,6 +68,35 @@ const dmSearchBtn = document.getElementById("dm-search-btn");
 const dmSearchResult = document.getElementById("dm-search-result");
 let myUserId = null;
 
+// BL-30: Search switcher tabs (Rooms vs Find Person by ID)
+const tabRoomsBtn = document.getElementById("tab-rooms-btn");
+const tabDmBtn = document.getElementById("tab-dm-btn");
+const tabRoomsPanel = document.getElementById("tab-rooms-panel");
+const tabDmPanel = document.getElementById("tab-dm-panel");
+
+function switchSearchTab(tab) {
+  const isRooms = tab !== "dm";
+  if (tabRoomsBtn) {
+    tabRoomsBtn.classList.toggle("active", isRooms);
+    tabRoomsBtn.setAttribute("aria-selected", String(isRooms));
+  }
+  if (tabDmBtn) {
+    tabDmBtn.classList.toggle("active", !isRooms);
+    tabDmBtn.setAttribute("aria-selected", String(!isRooms));
+  }
+  if (tabRoomsPanel) {
+    if (isRooms) tabRoomsPanel.removeAttribute("hidden");
+    else tabRoomsPanel.setAttribute("hidden", "true");
+  }
+  if (tabDmPanel) {
+    if (!isRooms) tabDmPanel.removeAttribute("hidden");
+    else tabDmPanel.setAttribute("hidden", "true");
+  }
+  if (isRooms && socket && socket.connected) {
+    socket.emit("search_rooms", { query: roomSearchInput ? roomSearchInput.value.trim() : "" });
+  }
+}
+
 // BL-18: Current room presence elements
 const onlineUsersList = document.getElementById("online-users-list");
 const onlineUsersCount = document.getElementById("online-users-count");
@@ -1235,6 +1264,17 @@ if (createRoomForm) {
     showError("");
     socket.emit("create_room", { room, description, visibility });
     closeCreateRoomModal();
+  });
+}
+
+// BL-30: Search tab button handlers
+if (tabRoomsBtn) {
+  tabRoomsBtn.addEventListener("click", () => switchSearchTab("rooms"));
+}
+if (tabDmBtn) {
+  tabDmBtn.addEventListener("click", () => {
+    switchSearchTab("dm");
+    if (dmIdSearchInput && !dmIdSearchInput.disabled) dmIdSearchInput.focus();
   });
 }
 
