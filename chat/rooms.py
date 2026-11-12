@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import re
 from flask import request
 from flask_socketio import emit, join_room as socketio_join_room, leave_room as socketio_leave_room
-from chat.connection import connected_users, state_lock
+from chat.connection import connected_users, state_lock, user_ids, get_user_by_id
 
 DEFAULT_ROOM = "global"
 MAX_ROOM_NAME_LENGTH = 30
@@ -222,6 +222,13 @@ def register(socketio):
         if raw_room is None:
             room = DEFAULT_ROOM
         else:
+            if isinstance(raw_room, str) and raw_room.strip().startswith("dm:"):
+                emit("error", {
+                    "code": "E403",
+                    "message": "Direct message rooms are private.",
+                    "event": "join_room",
+                })
+                return
             if not is_valid_room_name(raw_room):
                 emit("error", {
                     "code": "E303",
@@ -306,6 +313,8 @@ def register(socketio):
         with state_lock:
             all_rooms = set(room_members.keys()) | set(room_metadata.keys())
             for r in sorted(all_rooms):
+                if r.startswith("dm:"):
+                    continue
                 meta = room_metadata.get(r, {})
                 if meta.get("visibility") == "private":
                     continue
@@ -348,3 +357,76 @@ def register(socketio):
             "message": f"{username} left the room",
         }, to=old_room)
         emit_room_users(old_room)
+
+    @socketio.on("lookup_user")
+    def handle_lookup_user(data):
+        """Look up an active user by their unique user ID (BL-28)."""
+        sid = request.sid
+        if sid not in connected_users or not isinstance(data, dict):
+            return
+
+        query_id = data.get("user_id", "")
+        match = get_user_by_id(query_id)
+        if not match:
+            emit("user_lookup_result", {
+                "found": False,
+                "user_id": str(query_id).strip(),
+                "message": "No active user found with that ID.",
+            })
+            return
+
+        target_sid, target_name, norm_id = match
+        emit("user_lookup_result", {
+            "found": True,
+            "user_id": norm_id,
+            "username": target_name,
+            "is_self": target_sid == sid,
+        })
+
+    @socketio.on("start_dm")
+    def handle_start_dm(data):
+        """Start or join a private 1-on-1 direct message channel with another user (BL-28)."""
+        sid = request.sid
+        username = connected_users.get(sid)
+        my_id = user_ids.get(sid)
+        if not username or not my_id or not isinstance(data, dict):
+            return
+
+        match = get_user_by_id(data.get("user_id", ""))
+        if not match:
+            emit("error", {
+                "code": "E404",
+                "message": "Target user is offline or ID not found.",
+                "event": "start_dm",
+            })
+            return
+
+        target_sid, target_name, target_id = match
+        if target_sid == sid:
+            emit("error", {
+                "code": "E400",
+                "message": "Cannot start a direct chat with yourself.",
+                "event": "start_dm",
+            })
+            return
+
+        pair = sorted([my_id, target_id])
+        dm_room = f"dm:{pair[0]}:{pair[1]}"
+
+        with state_lock:
+            if dm_room not in room_metadata:
+                room_metadata[dm_room] = {
+                    "description": f"Private 1-on-1 chat ({username} & {target_name})",
+                    "visibility": "private",
+                    "admin_sid": None,
+                    "admin": None,
+                    "is_dm": True,
+                    "participants": pair,
+                }
+
+        _complete_room_join(sid, username, dm_room, socketio_inst=socketio)
+        socketio.emit("dm_invite", {
+            "room": dm_room,
+            "from_user_id": my_id,
+            "from_username": username,
+        }, to=target_sid)

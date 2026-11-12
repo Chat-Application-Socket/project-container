@@ -56,6 +56,14 @@ const joinRequestsPanel = document.getElementById("join-requests-panel");
 const joinRequestsList = document.getElementById("join-requests-list");
 const pendingJoinRequests = [];
 
+// BL-28: Unique User ID & 1-on-1 Direct Message elements
+const myUserIdEl = document.getElementById("my-user-id");
+const copyUserIdBtn = document.getElementById("copy-user-id-btn");
+const dmIdSearchInput = document.getElementById("dm-id-search-input");
+const dmSearchBtn = document.getElementById("dm-search-btn");
+const dmSearchResult = document.getElementById("dm-search-result");
+let myUserId = null;
+
 // BL-18: Current room presence elements
 const onlineUsersList = document.getElementById("online-users-list");
 const onlineUsersCount = document.getElementById("online-users-count");
@@ -148,7 +156,7 @@ function showError(message, level) {
   }
 }
 
-// BL-14 & BL-15 & BL-26 & BL-27: Room control enabling
+// BL-14 & BL-15 & BL-26 & BL-27 & BL-28: Room & DM control enabling
 function setRoomControlsEnabled(enabled, inRoom = false) {
   if (joinRoomBtn) joinRoomBtn.disabled = !enabled;
   if (leaveRoomBtn) leaveRoomBtn.disabled = !enabled || !inRoom;
@@ -156,6 +164,52 @@ function setRoomControlsEnabled(enabled, inRoom = false) {
   if (openCreateRoomBtn) openCreateRoomBtn.disabled = !enabled;
   if (roomSearchInput) roomSearchInput.disabled = !enabled;
   if (roomSearchBtn) roomSearchBtn.disabled = !enabled;
+  if (dmIdSearchInput) dmIdSearchInput.disabled = !enabled;
+  if (dmSearchBtn) dmSearchBtn.disabled = !enabled;
+  if (copyUserIdBtn) copyUserIdBtn.disabled = !enabled || !myUserId;
+}
+
+function renderDmLookupResult(data) {
+  if (!dmSearchResult) return;
+  dmSearchResult.textContent = "";
+  if (!data) return;
+
+  if (!data.found) {
+    const empty = document.createElement("li");
+    empty.className = "directory-meta";
+    empty.textContent = data.message || "User not found.";
+    dmSearchResult.appendChild(empty);
+    return;
+  }
+
+  const li = document.createElement("li");
+  li.className = "directory-item";
+  const box = document.createElement("div");
+  box.className = "directory-info";
+  const title = document.createElement("div");
+  title.className = "directory-name";
+  title.textContent = data.username;
+  const meta = document.createElement("div");
+  meta.className = "directory-meta";
+  meta.textContent = data.user_id;
+  box.appendChild(title);
+  box.appendChild(meta);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn-accent btn-sm";
+  btn.textContent = data.is_self ? "You" : "Chat";
+  btn.disabled = Boolean(data.is_self);
+  btn.addEventListener("click", () => {
+    if (socket && socket.connected) {
+      showError("");
+      socket.emit("start_dm", { user_id: data.user_id });
+    }
+  });
+
+  li.appendChild(box);
+  li.appendChild(btn);
+  dmSearchResult.appendChild(li);
 }
 
 function renderRoomSearchResults(rooms) {
@@ -810,6 +864,28 @@ function connectToServer(username) {
     }
   });
 
+  // BL-28: Direct Message user lookup & incoming 1-on-1 DM invite
+  socket.on("user_lookup_result", (data) => {
+    renderDmLookupResult(data);
+  });
+
+  socket.on("dm_invite", (data) => {
+    if (!data || !data.from_user_id || !data.from_username) return;
+    renderSystemNotice(
+      `${data.from_username} (${data.from_user_id}) started a private 1-on-1 chat with you.`,
+      new Date().toISOString()
+    );
+    if (dmSearchResult) {
+      dmSearchResult.textContent = "";
+      renderDmLookupResult({
+        found: true,
+        user_id: data.from_user_id,
+        username: `${data.from_username} (Incoming DM)`,
+        is_self: false,
+      });
+    }
+  });
+
   // BL-17/BL-18: Live online-user list for the active room
   socket.on("user_list", (data) => {
     if (!data || data.room !== currentRoom || !Array.isArray(data.members)) return;
@@ -842,6 +918,11 @@ function connectToServer(username) {
     console.log("Server acknowledgment:", data);
     if (data && typeof data.username === "string") {
       currentUsername = data.username;
+    }
+    if (data && typeof data.user_id === "string") {
+      myUserId = data.user_id;
+      if (myUserIdEl) myUserIdEl.textContent = myUserId;
+      if (copyUserIdBtn) copyUserIdBtn.disabled = false;
     }
   });
 
@@ -1089,6 +1170,45 @@ if (roomSearchBtn) {
 }
 if (roomSearchInput) {
   roomSearchInput.addEventListener("input", triggerRoomSearch);
+}
+
+// BL-28: Copy Unique ID & Search User for 1-on-1 DM
+if (copyUserIdBtn) {
+  copyUserIdBtn.addEventListener("click", () => {
+    if (!myUserId) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(myUserId).then(() => {
+        copyUserIdBtn.textContent = "Copied!";
+        setTimeout(() => { copyUserIdBtn.textContent = "Copy"; }, 1500);
+      }).catch(() => {});
+    }
+  });
+}
+
+function triggerDmLookup() {
+  if (!socket || !socket.connected) {
+    showError(MSG_NOT_CONNECTED);
+    return;
+  }
+  const queryId = dmIdSearchInput ? dmIdSearchInput.value.trim() : "";
+  if (!queryId) {
+    showError("Enter a User ID to search.");
+    return;
+  }
+  showError("");
+  socket.emit("lookup_user", { user_id: queryId });
+}
+
+if (dmSearchBtn) {
+  dmSearchBtn.addEventListener("click", triggerDmLookup);
+}
+if (dmIdSearchInput) {
+  dmIdSearchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      triggerDmLookup();
+    }
+  });
 }
 
 // Pre-fill username and initiate connection on initial page load

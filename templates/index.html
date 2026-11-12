@@ -42,6 +42,26 @@
               <button id="connect-btn" type="button">Connect</button>
             </div>
           </div>
+          <div class="field-row">
+            <label>Your Unique ID</label>
+            <div class="input-group">
+              <span id="my-user-id" class="id-pill">Not connected</span>
+              <button id="copy-user-id-btn" class="btn-secondary btn-sm" type="button" disabled>Copy</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- BL-28: 1-on-1 Direct Message by Unique ID -->
+        <section class="panel dm-panel">
+          <h2 class="panel-title">Direct Message (1-on-1)</h2>
+          <div class="field-row">
+            <label for="dm-id-search-input">Search by User ID</label>
+            <div class="input-group">
+              <input type="text" id="dm-id-search-input" placeholder="e.g. USR-A1B2C3" autocomplete="off" disabled>
+              <button id="dm-search-btn" class="btn-secondary btn-sm" type="button" disabled>Find</button>
+            </div>
+            <ul id="dm-search-result" class="directory-list"></ul>
+          </div>
         </section>
 
         <!-- BL-14, BL-15, BL-26, BL-27: Room Controls, Create & Public Discovery -->

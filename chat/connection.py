@@ -17,6 +17,7 @@ users are not active"; SAD 4.4.4):
 """
 
 import logging
+import secrets
 import threading
 from datetime import datetime, timezone
 
@@ -30,6 +31,9 @@ if not logger.handlers:
 
 # In-memory mapping of active client connections: {socket_session_id (sid): username}
 connected_users = {}
+# BL-28: Unique short user IDs for 1-on-1 direct chat lookup
+user_ids = {}
+id_to_sid = {}
 
 # Event handlers run on several threads (async_mode="threading"), so changes to
 # the shared session / room dictionaries are made while holding this lock.
@@ -56,6 +60,27 @@ def is_active(sid):
     return sid in connected_users
 
 
+def generate_unique_user_id():
+    """Generate a unique short user identifier (e.g., USR-A1B2C3)."""
+    with state_lock:
+        while True:
+            candidate = f"USR-{secrets.token_hex(3).upper()}"
+            if candidate not in id_to_sid:
+                return candidate
+
+
+def get_user_by_id(user_id):
+    """Look up an active user by their unique ID (case-insensitive)."""
+    if not isinstance(user_id, str):
+        return None
+    norm = user_id.strip().upper()
+    with state_lock:
+        target_sid = id_to_sid.get(norm)
+        if not target_sid or target_sid not in connected_users:
+            return None
+        return target_sid, connected_users[target_sid], norm
+
+
 def cleanup_session(sid):
     """Remove every trace of a session and return what was removed.
 
@@ -71,6 +96,9 @@ def cleanup_session(sid):
 
     with state_lock:
         username = connected_users.pop(sid, None)
+        uid = user_ids.pop(sid, None)
+        if uid:
+            id_to_sid.pop(uid, None)
         old_room = remove_user_from_room(sid)
     return username, old_room
 
@@ -132,12 +160,16 @@ def register(socketio):
         sid = request.sid
         with state_lock:
             connected_users[sid] = username
-        logger.info("Client connected: sid=%s user=%s", sid, username)
+            uid = generate_unique_user_id()
+            user_ids[sid] = uid
+            id_to_sid[uid] = sid
+        logger.info("Client connected: sid=%s user=%s id=%s", sid, username, uid)
 
         # Emit server acknowledgment directly to the newly connected client
         emit("ack", {
             "sid": sid,
             "username": username,
+            "user_id": uid,
             "message": "Connected",
         })
 
