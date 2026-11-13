@@ -29,10 +29,153 @@ const roomInput = document.getElementById("room-input");
 const joinRoomBtn = document.getElementById("join-room-btn");
 const leaveRoomBtn = document.getElementById("leave-room-btn");
 const currentRoomBadge = document.getElementById("current-room-badge");
+const roomAdminBadge = document.getElementById("room-admin-badge");
+const roomVisibilityBadge = document.getElementById("room-visibility-badge");
+const roomDescriptionBadge = document.getElementById("room-description-badge");
+const e2eeBadge = document.getElementById("e2ee-badge");
 let currentRoom = null;
+let lastActiveRoom = null;
+let currentRoomAdmin = null;
+let currentRoomVisibility = "public";
+const Crypto = typeof ChatCrypto === "object" && ChatCrypto ? ChatCrypto : null;
+const roomKeys = {};
 let typingTimeout = null;
 const typingUsers = {};
 let isTyping = false;
+
+// BL-26: Create Room modal elements
+const openCreateRoomBtn = document.getElementById("open-create-room-btn");
+const createRoomModal = document.getElementById("create-room-modal");
+const createRoomForm = document.getElementById("create-room-form");
+const closeCreateRoomBtn = document.getElementById("close-create-room-btn");
+const createRoomCancelBtn = document.getElementById("create-room-cancel-btn");
+const newRoomNameInput = document.getElementById("new-room-name");
+const newRoomDescInput = document.getElementById("new-room-description");
+const newRoomVisibilitySelect = document.getElementById("new-room-visibility");
+
+// BL-27: Room discovery & Admin join request elements
+const roomSearchInput = document.getElementById("room-search-input");
+const roomSearchBtn = document.getElementById("room-search-btn");
+const roomSearchResults = document.getElementById("room-search-results");
+const joinRequestsPanel = document.getElementById("join-requests-panel");
+const joinRequestsList = document.getElementById("join-requests-list");
+const pendingJoinRequests = [];
+
+// BL-28: Unique User ID & 1-on-1 Direct Message elements
+const myUserIdEl = document.getElementById("my-user-id");
+const copyUserIdBtn = document.getElementById("copy-user-id-btn");
+const dmIdSearchInput = document.getElementById("dm-id-search-input");
+const dmSearchBtn = document.getElementById("dm-search-btn");
+const dmSearchResult = document.getElementById("dm-search-result");
+const recentChatsPanel = document.getElementById("recent-chats-panel");
+const recentChatsList = document.getElementById("recent-chats-list");
+const recentChats = {};
+let myUserId = null;
+
+const AVATAR_COLORS = [
+  "#2563eb",
+  "#059669",
+  "#d97706",
+  "#7c3aed",
+  "#dc2626",
+  "#0891b2",
+  "#4f46e5",
+];
+
+function getAvatarColor(name) {
+  const str = String(name || "?");
+  let hash = 0;
+  for (let i = 0; i < str.length; i += 1) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  }
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+function recordRecentChat(userId, username) {
+  if (!userId || !username || userId === myUserId) return;
+  recentChats[userId] = { userId, username };
+  renderRecentChats();
+}
+
+function renderRecentChats() {
+  if (!recentChatsPanel || !recentChatsList) return;
+  const entries = Object.values(recentChats);
+  recentChatsList.textContent = "";
+  if (entries.length === 0) {
+    recentChatsPanel.setAttribute("hidden", "true");
+    return;
+  }
+  recentChatsPanel.removeAttribute("hidden");
+  entries.forEach((entry) => {
+    const li = document.createElement("li");
+    li.className = "directory-item";
+
+    const avatar = document.createElement("div");
+    avatar.className = "avatar-circle";
+    avatar.style.backgroundColor = getAvatarColor(entry.username);
+    avatar.textContent = entry.username.charAt(0).toUpperCase();
+    const dot = document.createElement("span");
+    dot.className = "status-dot-online";
+    dot.title = "Active";
+    avatar.appendChild(dot);
+
+    const box = document.createElement("div");
+    box.className = "directory-info";
+    const title = document.createElement("div");
+    title.className = "directory-name";
+    title.textContent = entry.username;
+    const meta = document.createElement("div");
+    meta.className = "directory-meta";
+    meta.textContent = entry.userId;
+    box.appendChild(title);
+    box.appendChild(meta);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-secondary btn-sm";
+    btn.textContent = "Open";
+    btn.addEventListener("click", () => {
+      if (socket && socket.connected) {
+        showError("");
+        socket.emit("start_dm", { user_id: entry.userId });
+      }
+    });
+
+    li.appendChild(avatar);
+    li.appendChild(box);
+    li.appendChild(btn);
+    recentChatsList.appendChild(li);
+  });
+}
+
+// BL-30: Search switcher tabs (Rooms vs Find Person by ID)
+const tabRoomsBtn = document.getElementById("tab-rooms-btn");
+const tabDmBtn = document.getElementById("tab-dm-btn");
+const tabRoomsPanel = document.getElementById("tab-rooms-panel");
+const tabDmPanel = document.getElementById("tab-dm-panel");
+
+function switchSearchTab(tab) {
+  const isRooms = tab !== "dm";
+  if (tabRoomsBtn) {
+    tabRoomsBtn.classList.toggle("active", isRooms);
+    tabRoomsBtn.setAttribute("aria-selected", String(isRooms));
+  }
+  if (tabDmBtn) {
+    tabDmBtn.classList.toggle("active", !isRooms);
+    tabDmBtn.setAttribute("aria-selected", String(!isRooms));
+  }
+  if (tabRoomsPanel) {
+    if (isRooms) tabRoomsPanel.removeAttribute("hidden");
+    else tabRoomsPanel.setAttribute("hidden", "true");
+  }
+  if (tabDmPanel) {
+    if (!isRooms) tabDmPanel.removeAttribute("hidden");
+    else tabDmPanel.setAttribute("hidden", "true");
+  }
+  if (isRooms && socket && socket.connected) {
+    socket.emit("search_rooms", { query: roomSearchInput ? roomSearchInput.value.trim() : "" });
+  }
+}
 
 // BL-18: Current room presence elements
 const onlineUsersList = document.getElementById("online-users-list");
@@ -95,10 +238,9 @@ let connectionState = "disconnected";
 // failure is "cannot reach the server" (C01) or "connection lost" (C02).
 let hadSession = false;
 
-// Room to (re)join after every successful connect. Updated when the server
-// confirms a join, cleared when the user leaves on purpose (REQ-15: rejoin the
-// previous room after a reconnect).
-let desiredRoom = DEFAULT_ROOM;
+// Room to (re)join after a reconnect. Starts null so users choose or create a room
+// first, and is updated when the server confirms a join (cleared on explicit Leave).
+let desiredRoom = null;
 
 // Back-off scheduler; null only if reconnect.js failed to load.
 const reconnectScheduler = Reconnect ? new Reconnect.ReconnectScheduler({
@@ -126,11 +268,228 @@ function showError(message, level) {
   }
 }
 
-// BL-14 & BL-15: Room control enabling
+// BL-14 & BL-15 & BL-26 & BL-27 & BL-28: Room & DM control enabling
 function setRoomControlsEnabled(enabled, inRoom = false) {
   if (joinRoomBtn) joinRoomBtn.disabled = !enabled;
   if (leaveRoomBtn) leaveRoomBtn.disabled = !enabled || !inRoom;
   if (roomInput) roomInput.disabled = !enabled;
+  if (openCreateRoomBtn) openCreateRoomBtn.disabled = !enabled;
+  if (roomSearchInput) roomSearchInput.disabled = !enabled;
+  if (roomSearchBtn) roomSearchBtn.disabled = !enabled;
+  if (dmIdSearchInput) dmIdSearchInput.disabled = !enabled;
+  if (dmSearchBtn) dmSearchBtn.disabled = !enabled;
+  if (copyUserIdBtn) copyUserIdBtn.disabled = !enabled || !myUserId;
+}
+
+function renderDmLookupResult(data) {
+  if (!dmSearchResult) return;
+  dmSearchResult.textContent = "";
+  if (!data) return;
+
+  if (!data.found) {
+    const empty = document.createElement("li");
+    empty.className = "directory-meta";
+    empty.textContent = data.message || "User not found.";
+    dmSearchResult.appendChild(empty);
+    return;
+  }
+
+  const li = document.createElement("li");
+  li.className = "directory-item";
+  const box = document.createElement("div");
+  box.className = "directory-info";
+  const title = document.createElement("div");
+  title.className = "directory-name";
+  title.textContent = data.username;
+  const meta = document.createElement("div");
+  meta.className = "directory-meta";
+  meta.textContent = data.user_id;
+  box.appendChild(title);
+  box.appendChild(meta);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn-accent btn-sm";
+  btn.textContent = data.is_self ? "You" : "Chat";
+  btn.disabled = Boolean(data.is_self);
+  btn.addEventListener("click", () => {
+    if (socket && socket.connected) {
+      showError("");
+      socket.emit("start_dm", { user_id: data.user_id });
+    }
+  });
+
+  li.appendChild(box);
+  li.appendChild(btn);
+  dmSearchResult.appendChild(li);
+}
+
+function renderRoomSearchResults(rooms) {
+  if (!roomSearchResults) return;
+  roomSearchResults.textContent = "";
+  const list = Array.isArray(rooms) ? rooms : [];
+  if (list.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "directory-meta";
+    empty.textContent = "No matching public rooms.";
+    roomSearchResults.appendChild(empty);
+    return;
+  }
+  list.forEach((info) => {
+    const li = document.createElement("li");
+    li.className = "directory-item";
+
+    const box = document.createElement("div");
+    box.className = "directory-info";
+    const title = document.createElement("div");
+    title.className = "directory-name";
+    title.textContent = `${info.room} (${info.member_count || 0})`;
+    const meta = document.createElement("div");
+    meta.className = "directory-meta";
+    const adminText = info.admin ? `Admin: ${info.admin}` : "Public";
+    meta.textContent = info.description ? `${info.description} — ${adminText}` : adminText;
+    box.appendChild(title);
+    box.appendChild(meta);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-sm";
+    btn.textContent = info.room === currentRoom ? "Joined" : "Join";
+    btn.disabled = info.room === currentRoom;
+    btn.addEventListener("click", () => {
+      if (socket && socket.connected) {
+        showError("");
+        socket.emit("join_room", { room: info.room });
+      }
+    });
+
+    li.appendChild(box);
+    li.appendChild(btn);
+    roomSearchResults.appendChild(li);
+  });
+}
+
+function renderJoinRequests() {
+  if (!joinRequestsPanel || !joinRequestsList) return;
+  joinRequestsList.textContent = "";
+  if (pendingJoinRequests.length === 0) {
+    joinRequestsPanel.setAttribute("hidden", "true");
+    return;
+  }
+  joinRequestsPanel.removeAttribute("hidden");
+  pendingJoinRequests.forEach((req, index) => {
+    const li = document.createElement("li");
+    li.className = "directory-item";
+
+    const box = document.createElement("div");
+    box.className = "directory-info";
+    const title = document.createElement("div");
+    title.className = "directory-name";
+    title.textContent = req.requester;
+    const meta = document.createElement("div");
+    meta.className = "directory-meta";
+    meta.textContent = `Wants to join ${req.room}`;
+    box.appendChild(title);
+    box.appendChild(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "input-group";
+
+    const allowBtn = document.createElement("button");
+    allowBtn.type = "button";
+    allowBtn.className = "btn-success btn-sm";
+    allowBtn.textContent = "Allow";
+    allowBtn.addEventListener("click", () => {
+      if (socket && socket.connected) {
+        socket.emit("respond_join_request", {
+          room: req.room,
+          requester_sid: req.requester_sid,
+          allow: true,
+        });
+      }
+      pendingJoinRequests.splice(index, 1);
+      renderJoinRequests();
+    });
+
+    const denyBtn = document.createElement("button");
+    denyBtn.type = "button";
+    denyBtn.className = "btn-danger btn-sm";
+    denyBtn.textContent = "Deny";
+    denyBtn.addEventListener("click", () => {
+      if (socket && socket.connected) {
+        socket.emit("respond_join_request", {
+          room: req.room,
+          requester_sid: req.requester_sid,
+          allow: false,
+        });
+      }
+      pendingJoinRequests.splice(index, 1);
+      renderJoinRequests();
+    });
+
+    actions.appendChild(allowBtn);
+    actions.appendChild(denyBtn);
+    li.appendChild(box);
+    li.appendChild(actions);
+    joinRequestsList.appendChild(li);
+  });
+}
+
+function updateRoomMetaBadges(data) {
+  if (!data || !data.room) {
+    currentRoomAdmin = null;
+    currentRoomVisibility = "public";
+    if (roomAdminBadge) {
+      roomAdminBadge.textContent = "";
+      roomAdminBadge.setAttribute("hidden", "true");
+    }
+    if (roomVisibilityBadge) {
+      roomVisibilityBadge.textContent = "";
+      roomVisibilityBadge.classList.remove("private");
+      roomVisibilityBadge.setAttribute("hidden", "true");
+    }
+    if (roomDescriptionBadge) {
+      roomDescriptionBadge.textContent = "";
+      roomDescriptionBadge.setAttribute("hidden", "true");
+    }
+    if (e2eeBadge) e2eeBadge.setAttribute("hidden", "true");
+    return;
+  }
+
+  currentRoomAdmin = typeof data.admin === "string" && data.admin ? data.admin : null;
+  currentRoomVisibility = data.visibility === "private" ? "private" : "public";
+  if (roomAdminBadge) {
+    if (currentRoomAdmin) {
+      roomAdminBadge.textContent = `Admin: ${currentRoomAdmin}`;
+      roomAdminBadge.removeAttribute("hidden");
+    } else {
+      roomAdminBadge.textContent = "";
+      roomAdminBadge.setAttribute("hidden", "true");
+    }
+  }
+  if (roomVisibilityBadge) {
+    const vis = currentRoomVisibility;
+    roomVisibilityBadge.textContent = vis === "private" ? "Private" : "Public";
+    roomVisibilityBadge.classList.toggle("private", vis === "private");
+    roomVisibilityBadge.removeAttribute("hidden");
+  }
+  if (e2eeBadge) {
+    if (currentRoomVisibility === "private") {
+      e2eeBadge.removeAttribute("hidden");
+    } else {
+      e2eeBadge.setAttribute("hidden", "true");
+    }
+  }
+  if (roomDescriptionBadge) {
+    const desc = typeof data.description === "string" ? data.description.trim() : "";
+    if (desc) {
+      roomDescriptionBadge.textContent = desc;
+      roomDescriptionBadge.removeAttribute("hidden");
+    } else {
+      roomDescriptionBadge.textContent = "";
+      roomDescriptionBadge.setAttribute("hidden", "true");
+    }
+  }
 }
 
 // BL-21: Label of the Connect button for each state.
@@ -153,6 +512,7 @@ function setConnectionState(state) {
   if (!isConnected) {
     currentRoom = null;
     if (currentRoomBadge) currentRoomBadge.textContent = "Room: none";
+    updateRoomMetaBadges(null);
     renderOnlineUsers([]);
   }
   // The composer is disabled while disconnected; typed text stays in the box
@@ -227,8 +587,9 @@ function reconnectNow() {
   }
 }
 
-function renderOnlineUsers(members) {
+function renderOnlineUsers(members, adminName) {
   if (!onlineUsersList || !onlineUsersCount) return;
+  const admin = typeof adminName === "string" ? adminName : currentRoomAdmin;
   const users = Array.isArray(members) ? members.filter((name) => typeof name === "string") : [];
   onlineUsersList.textContent = "";
   onlineUsersCount.textContent = String(users.length);
@@ -242,7 +603,15 @@ function renderOnlineUsers(members) {
   users.forEach((username) => {
     const item = document.createElement("li");
     item.className = "online-user";
-    item.textContent = username;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = username;
+    item.appendChild(nameSpan);
+    if (admin && username === admin) {
+      const pill = document.createElement("span");
+      pill.className = "admin-pill";
+      pill.textContent = "Admin";
+      item.appendChild(pill);
+    }
     if (username === currentUsername) item.classList.add("online-user-self");
     onlineUsersList.appendChild(item);
   });
@@ -267,21 +636,31 @@ function formatTimestamp(timestamp) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-// Build one message row: sender + timestamp on top, message text below.
+// Build one Slack/Discord-style message row: colored initial avatar on left,
+// sender + timestamp on top, message text below.
 // Every value is written with textContent so HTML in a message is shown as text (NFR-SEC-2).
 function createMessageElement(msg) {
+  const senderName = msg.sender ? String(msg.sender) : "unknown";
   const item = document.createElement("li");
   item.className = "message";
   if (currentUsername && msg.sender === currentUsername) {
     item.classList.add("own");
   }
 
+  const avatar = document.createElement("div");
+  avatar.className = "message-avatar";
+  avatar.style.backgroundColor = getAvatarColor(senderName);
+  avatar.textContent = senderName.charAt(0).toUpperCase();
+
+  const body = document.createElement("div");
+  body.className = "message-body";
+
   const meta = document.createElement("div");
   meta.className = "message-meta";
 
   const sender = document.createElement("span");
   sender.className = "message-sender";
-  sender.textContent = msg.sender ? String(msg.sender) : "unknown";
+  sender.textContent = senderName;
 
   const time = document.createElement("time");
   time.className = "message-time";
@@ -297,8 +676,10 @@ function createMessageElement(msg) {
 
   meta.appendChild(sender);
   meta.appendChild(time);
-  item.appendChild(meta);
-  item.appendChild(content);
+  body.appendChild(meta);
+  body.appendChild(content);
+  item.appendChild(avatar);
+  item.appendChild(body);
   return item;
 }
 
@@ -373,18 +754,25 @@ function renderMessageAt(msg, index) {
 // Called for every "message" event pushed by the server (no polling, no refresh).
 // The view follows new messages if the user is already at the bottom or the
 // message is their own; if they scrolled up to read older ones, it stays put.
-function handleIncomingMessage(msg) {
+async function handleIncomingMessage(msg) {
   if (!msg || typeof msg !== "object") return;
 
-  const followLatest = isNearBottom() || (currentUsername && msg.sender === currentUsername);
+  let displayMsg = msg;
+  const msgRoom = msg.room || currentRoom;
+  if (msg.encrypted && Crypto && msgRoom && roomKeys[msgRoom]) {
+    const plaintext = await Crypto.decryptMessage(msg, roomKeys[msgRoom].keyHex);
+    displayMsg = Object.assign({}, msg, { content: plaintext });
+  }
+
+  const followLatest = isNearBottom() || (currentUsername && displayMsg.sender === currentUsername);
 
   let item;
   if (messageStore) {
-    const index = messageStore.add(msg);
+    const index = messageStore.add(displayMsg);
     if (index === -1) return; // duplicate or invalid: never shown twice
-    item = renderMessageAt(msg, index);
+    item = renderMessageAt(displayMsg, index);
   } else {
-    item = renderMessage(msg);
+    item = renderMessage(displayMsg);
   }
 
   if (item && followLatest) {
@@ -421,11 +809,24 @@ function clearTypingIndicator(username) {
 function renderTypingIndicator() {
   if (!typingIndicator) return;
   const names = Object.keys(typingUsers);
-  typingIndicator.textContent = names.length === 0
-    ? ""
-    : names.length === 1
-      ? names[0] + " is typing..."
-      : names.join(", ") + " are typing...";
+  typingIndicator.textContent = "";
+  if (names.length === 0) return;
+
+  const dots = document.createElement("span");
+  dots.className = "typing-dots";
+  dots.setAttribute("aria-hidden", "true");
+  for (let i = 0; i < 3; i += 1) {
+    dots.appendChild(document.createElement("span"));
+  }
+
+  const label = document.createElement("span");
+  label.className = "typing-text";
+  label.textContent = names.length === 1
+    ? `${names[0]} is typing`
+    : `${names.join(", ")} are typing`;
+
+  typingIndicator.appendChild(dots);
+  typingIndicator.appendChild(label);
 }
 
 function stopTyping() {
@@ -453,7 +854,7 @@ function sendTyping() {
 
 // Send the text in the input box to the server.
 // The server derives sender, room and timestamp; the client sends only content (SAD ADR-2).
-function sendMessage() {
+async function sendMessage() {
   if (!messageInput) return;
 
   // BL-07: Block empty / whitespace-only input before anything is sent (C04).
@@ -473,7 +874,21 @@ function sendMessage() {
 
   const content = messageInput.value.trim();
   stopTyping();
-  socket.emit("message", { content: content });
+  if (currentRoomVisibility === "private" && Crypto && currentRoom) {
+    if (!roomKeys[currentRoom]) {
+      socket.emit("request_room_key", { use_fallback: !Crypto.hasSubtle() });
+      showError("Syncing encryption key, please retry in a moment.", "warning");
+      return;
+    }
+    const enc = await Crypto.encryptMessage(
+      content,
+      roomKeys[currentRoom].keyHex,
+      roomKeys[currentRoom].useFallback || !Crypto.hasSubtle()
+    );
+    socket.emit("message", Object.assign({ content: "[Encrypted message]" }, enc));
+  } else {
+    socket.emit("message", { content: content });
+  }
   showError("");
 
   messageInput.value = "";
@@ -520,11 +935,12 @@ function connectToServer(username) {
   }
 
   // BL-08: A new connection starts with an empty message area
+  lastActiveRoom = null;
   clearMessages();
 
-  // BL-21: A new session starts fresh: default room, no failed attempts.
+  // BL-21: A new session starts fresh with no auto-joined room.
   hadSession = false;
-  desiredRoom = DEFAULT_ROOM;
+  desiredRoom = null;
   if (reconnectScheduler) reconnectScheduler.reset();
   setConnectionState("connecting");
 
@@ -553,23 +969,84 @@ function connectToServer(username) {
     if (desiredRoom) {
       socket.emit("join_room", { room: desiredRoom });
     }
+    socket.emit("search_rooms", { query: roomSearchInput ? roomSearchInput.value.trim() : "" });
     if (isReconnect) {
       renderSystemNotice(RECONNECT_MESSAGES.RECONNECTED, new Date().toISOString());
     }
   });
 
-  // BL-14: Acknowledged room join
+  // BL-14 & BL-26: Acknowledged room join
   socket.on("joined", (data) => {
     stopTyping();
     Object.keys(typingUsers).forEach(clearTypingIndicator);
     if (data && typeof data.room === "string") {
+      if (lastActiveRoom && lastActiveRoom !== data.room) {
+        clearMessages();
+      }
+      lastActiveRoom = data.room;
       currentRoom = data.room;
       desiredRoom = data.room; // BL-21: rejoin this room after a reconnect
-      if (currentRoomBadge) currentRoomBadge.textContent = `Room: ${data.room}`;
-      if (roomInput) roomInput.value = data.room;
+
+      let badgeLabel = `Room: ${data.room}`;
+      if (data.is_dm && data.participant_names && typeof data.participant_names === "object") {
+        const peerEntry = Object.entries(data.participant_names).find(([uid]) => uid !== myUserId);
+        if (peerEntry) {
+          badgeLabel = `Direct Chat: ${peerEntry[1]}`;
+          recordRecentChat(peerEntry[0], peerEntry[1]);
+        }
+      }
+      if (currentRoomBadge) currentRoomBadge.textContent = badgeLabel;
+      if (roomInput && !data.is_dm) roomInput.value = data.room;
+      updateRoomMetaBadges(data);
       setRoomControlsEnabled(true, true);
-      renderOnlineUsers(data.members);
+      renderOnlineUsers(data.members, data.admin);
+      socket.emit("search_rooms", { query: roomSearchInput ? roomSearchInput.value.trim() : "" });
+
+      // BL-29: Only the room creator / DM initiator generates the key; peers request it
+      if (data.visibility === "private" && Crypto) {
+        if (data.is_admin && !roomKeys[data.room]) {
+          roomKeys[data.room] = {
+            keyHex: Crypto.generateKeyHex(),
+            useFallback: !Crypto.hasSubtle(),
+          };
+          socket.emit("share_room_key", {
+            room: data.room,
+            key_hex: roomKeys[data.room].keyHex,
+            use_fallback: roomKeys[data.room].useFallback,
+          });
+        } else if (data.is_admin && roomKeys[data.room]) {
+          socket.emit("share_room_key", {
+            room: data.room,
+            key_hex: roomKeys[data.room].keyHex,
+            use_fallback: roomKeys[data.room].useFallback,
+          });
+        } else if (!roomKeys[data.room]) {
+          socket.emit("request_room_key", { use_fallback: !Crypto.hasSubtle() });
+        }
+      }
     }
+  });
+
+  // BL-29: Receive or share room encryption keys for private rooms & 1-on-1 DMs
+  socket.on("room_key_shared", (data) => {
+    if (!data || !data.room || !data.key_hex) return;
+    const prev = roomKeys[data.room];
+    roomKeys[data.room] = {
+      keyHex: data.key_hex,
+      useFallback: Boolean(data.use_fallback) || (prev ? prev.useFallback : false),
+    };
+  });
+
+  socket.on("room_key_requested", (data) => {
+    if (!data || !data.room || !roomKeys[data.room]) return;
+    if (data.use_fallback) {
+      roomKeys[data.room].useFallback = true;
+    }
+    socket.emit("share_room_key", {
+      room: data.room,
+      key_hex: roomKeys[data.room].keyHex,
+      use_fallback: roomKeys[data.room].useFallback,
+    });
   });
 
   // BL-15: Acknowledged room leave
@@ -579,14 +1056,67 @@ function connectToServer(username) {
     currentRoom = null;
     desiredRoom = null; // BL-21: user left on purpose; do not rejoin it
     if (currentRoomBadge) currentRoomBadge.textContent = "Room: none";
+    updateRoomMetaBadges(null);
     renderOnlineUsers([]);
     setRoomControlsEnabled(true, false);
+    socket.emit("search_rooms", { query: roomSearchInput ? roomSearchInput.value.trim() : "" });
+  });
+
+  // BL-27: Public room search results & Private room join requests
+  socket.on("room_list", (data) => {
+    renderRoomSearchResults(data && data.rooms ? data.rooms : []);
+  });
+
+  socket.on("join_request", (data) => {
+    if (!data || !data.room || !data.requester_sid || !data.requester) return;
+    const exists = pendingJoinRequests.some(
+      (r) => r.room === data.room && r.requester_sid === data.requester_sid
+    );
+    if (!exists) {
+      pendingJoinRequests.push(data);
+      renderJoinRequests();
+      renderSystemNotice(`${data.requester} requested to join ${data.room}.`, new Date().toISOString());
+    }
+  });
+
+  socket.on("join_request_pending", (data) => {
+    if (data && data.message) {
+      showError(data.message, "warning");
+    }
+  });
+
+  socket.on("join_request_rejected", (data) => {
+    if (data && data.message) {
+      showError(data.message);
+    }
+  });
+
+  // BL-28: Direct Message user lookup & incoming 1-on-1 DM invite
+  socket.on("user_lookup_result", (data) => {
+    renderDmLookupResult(data);
+  });
+
+  socket.on("dm_invite", (data) => {
+    if (!data || !data.from_user_id || !data.from_username) return;
+    renderSystemNotice(
+      `${data.from_username} (${data.from_user_id}) started a private 1-on-1 chat with you.`,
+      new Date().toISOString()
+    );
+    if (dmSearchResult) {
+      dmSearchResult.textContent = "";
+      renderDmLookupResult({
+        found: true,
+        user_id: data.from_user_id,
+        username: `${data.from_username} (Incoming DM)`,
+        is_self: false,
+      });
+    }
   });
 
   // BL-17/BL-18: Live online-user list for the active room
   socket.on("user_list", (data) => {
     if (!data || data.room !== currentRoom || !Array.isArray(data.members)) return;
-    renderOnlineUsers(data.members);
+    renderOnlineUsers(data.members, data.admin);
   });
 
   // BL-19: Show typing activity from other members of the current room.
@@ -615,6 +1145,11 @@ function connectToServer(username) {
     console.log("Server acknowledgment:", data);
     if (data && typeof data.username === "string") {
       currentUsername = data.username;
+    }
+    if (data && typeof data.user_id === "string") {
+      myUserId = data.user_id;
+      if (myUserIdEl) myUserIdEl.textContent = myUserId;
+      if (!copyUserIdBtn) copyUserIdBtn.disabled = false;
     }
   });
 
@@ -796,6 +1331,147 @@ if (leaveRoomBtn) {
     }
     showError("");
     socket.emit("leave_room", {});
+  });
+}
+
+// BL-26: Create Room modal handlers
+function closeCreateRoomModal() {
+  if (createRoomModal) createRoomModal.setAttribute("hidden", "true");
+}
+
+if (openCreateRoomBtn && createRoomModal) {
+  openCreateRoomBtn.addEventListener("click", () => {
+    if (!socket || !socket.connected) {
+      showError(MSG_NOT_CONNECTED);
+      return;
+    }
+    if (newRoomNameInput) newRoomNameInput.value = "";
+    if (newRoomDescInput) newRoomDescInput.value = "";
+    if (newRoomVisibilitySelect) newRoomVisibilitySelect.value = "public";
+    createRoomModal.removeAttribute("hidden");
+    if (newRoomNameInput) newRoomNameInput.focus();
+  });
+}
+
+if (closeCreateRoomBtn) {
+  closeCreateRoomBtn.addEventListener("click", closeCreateRoomModal);
+}
+if (createRoomCancelBtn) {
+  createRoomCancelBtn.addEventListener("click", closeCreateRoomModal);
+}
+if (createRoomModal) {
+  createRoomModal.addEventListener("click", (e) => {
+    if (e.target === createRoomModal) closeCreateRoomModal();
+  });
+}
+
+if (createRoomForm) {
+  createRoomForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!socket || !socket.connected) {
+      showError(MSG_NOT_CONNECTED);
+      return;
+    }
+    const room = newRoomNameInput ? newRoomNameInput.value.trim() : "";
+    const description = newRoomDescInput ? newRoomDescInput.value.trim() : "";
+    const visibility = newRoomVisibilitySelect ? newRoomVisibilitySelect.value : "public";
+    if (!room) {
+      showError("Room name cannot be empty.");
+      return;
+    }
+    showError("");
+    socket.emit("create_room", { room, description, visibility });
+    closeCreateRoomModal();
+  });
+}
+
+// BL-30: Search tab button handlers
+if (tabRoomsBtn) {
+  tabRoomsBtn.addEventListener("click", () => switchSearchTab("rooms"));
+}
+if (tabDmBtn) {
+  tabDmBtn.addEventListener("click", () => {
+    switchSearchTab("dm");
+    if (dmIdSearchInput && !dmIdSearchInput.disabled) dmIdSearchInput.focus();
+  });
+}
+
+// BL-27: Public room search handlers
+function triggerRoomSearch() {
+  if (!socket || !socket.connected) return;
+  const query = roomSearchInput ? roomSearchInput.value.trim() : "";
+  socket.emit("search_rooms", { query });
+}
+
+if (roomSearchBtn) {
+  roomSearchBtn.addEventListener("click", triggerRoomSearch);
+}
+if (roomSearchInput) {
+  roomSearchInput.addEventListener("input", triggerRoomSearch);
+}
+
+// BL-28: Copy Unique ID & Search User for 1-on-1 DM
+function fallbackCopyText(text) {
+  const helper = document.createElement("textarea");
+  helper.value = text;
+  helper.setAttribute("readonly", "");
+  helper.style.position = "fixed";
+  helper.style.left = "-9999px";
+  document.body.appendChild(helper);
+  helper.select();
+  helper.setSelectionRange(0, text.length);
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch (err) {
+    ok = false;
+  }
+  document.body.removeChild(helper);
+  return ok;
+}
+
+function showCopiedFeedback() {
+  if (!copyUserIdBtn) return;
+  copyUserIdBtn.textContent = "Copied!";
+  setTimeout(() => { copyUserIdBtn.textContent = "Copy"; }, 1500);
+}
+
+if (copyUserIdBtn) {
+  copyUserIdBtn.addEventListener("click", () => {
+    if (!myUserId) return;
+    if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+      navigator.clipboard.writeText(myUserId).then(showCopiedFeedback).catch(() => {
+        if (fallbackCopyText(myUserId)) showCopiedFeedback();
+      });
+    } else if (fallbackCopyText(myUserId)) {
+      showCopiedFeedback();
+    }
+  });
+}
+
+function triggerDmLookup() {
+  if (!socket || !socket.connected) {
+    showError(MSG_NOT_CONNECTED);
+    return;
+  }
+  const queryId = dmIdSearchInput ? dmIdSearchInput.value.trim() : "";
+  if (!queryId) {
+    showError("Enter a User ID to search.");
+    return;
+  }
+  showError("");
+  socket.emit("lookup_user", { user_id: queryId });
+}
+
+if (dmSearchBtn) {
+  dmSearchBtn.addEventListener("click", triggerDmLookup);
+}
+if (dmIdSearchInput) {
+  dmIdSearchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      triggerDmLookup();
+    }
   });
 }
 
